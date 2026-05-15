@@ -1,0 +1,6 @@
+(include_subdirs qualified)
+
+(library
+ (name emulator)
+ (public_name famicaml.emulator)
+ (libraries famicaml.common))

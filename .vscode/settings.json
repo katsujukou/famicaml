@@ -1,0 +1,42 @@
+{
+  "direnv.restart.automatic": true,
+
+  "ocaml.useOcamlEnv": false,
+  "ocaml.sandbox": {
+    "kind": "global"
+  },
+
+  "[ocaml]": {
+    "editor.defaultFormatter": "ocamllabs.ocaml-platform",
+    "editor.formatOnSave": true,
+    "editor.tabSize": 2,
+    "editor.insertSpaces": true
+  },
+  "[dune]": {
+    "editor.defaultFormatter": "ocamllabs.ocaml-platform",
+    "editor.formatOnSave": true,
+    "editor.tabSize": 1
+  },
+  "[dune-project]": {
+    "editor.defaultFormatter": "ocamllabs.ocaml-platform"
+  },
+
+  "files.associations": {
+    "dune": "dune",
+    "dune-project": "dune-project",
+    "*.mli": "ocaml.interface",
+    "*.mll": "ocaml.ocamllex",
+    "*.mly": "ocaml.menhir"
+  },
+
+  "files.exclude": {
+    "**/_build": true,
+    "**/_opam": true,
+    "result": true,
+    "result-*": true
+  },
+  "search.exclude": {
+    "**/_build": true,
+    "**/.direnv": true
+  }
+}

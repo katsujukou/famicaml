@@ -1,0 +1,10 @@
+node_modules/
+dist/
+lib/
+
+# rescript の中間ファイル
+src/**/*.res.js
+src/**/*.res.mjs
+
+# wasm コピー先(ビルド成果物なので追跡しない)
+public/wasm/
