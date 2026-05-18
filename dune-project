@@ -1,4 +1,4 @@
-(lang dune 3.17)
+(lang dune 3.20)
 
 (name famicaml)
 
@@ -7,9 +7,11 @@
 (package
  (name famicaml)
  (synopsis "Project FamiCaml")
- (depends
-  (ocaml
-   (>= 5.3))
-  dune
-  cmdliner
-  base))
+(depends
+ (ocaml (>= 5.3))
+ dune
+ cmdliner
+ base
+ stdint
+ js_of_ocaml
+ js_of_ocaml-ppx))

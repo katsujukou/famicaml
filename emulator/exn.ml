@@ -1,1 +1,3 @@
-type exn += Not_implemented
+exception Out_of_range
+
+exception Not_implemented

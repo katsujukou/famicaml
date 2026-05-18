@@ -1,7 +1,7 @@
 open Stdint
 
 (** CPU6502におけるニーモニック *)
-type opecode = 
+type opcode = 
   (* 転送命令 *)
   | LDA | LDX | LDY | STA | STX | STY 
   | TAX | TAY | TSX | TXA | TXS | TYA
@@ -36,7 +36,7 @@ type operand_with_mode =
   | Absolute_X of uint16
   | Absolute_Y of uint16
   | Indirect of uint16
-  | Indirect_X of uint16
-  | Indirect_Y of uint16
+  | Indirect_X of uint8
+  | Indirect_Y of uint8
 
-type t = (opecode * operand_with_mode)
+type t = (opcode * operand_with_mode)

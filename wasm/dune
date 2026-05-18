@@ -1,4 +1,4 @@
 (executable
  (name main)
  (modes wasm)
- (libraries famicaml.common famicaml.emulator))
+ (libraries famicaml.emulator))

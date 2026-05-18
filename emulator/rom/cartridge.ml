@@ -1,4 +1,3 @@
-open Bytes
 
 type mirror = H | V 
 
@@ -8,7 +7,10 @@ type cart_spec = {
   has_trainer: bool;
 }
 
-type rom = 
+type rom_spec = 
   | NROM of { prg: Bytes.t; chr: Bytes.t }
 
-type t = cart_spec * rom
+type t = {
+  spec: cart_spec; 
+  rom: rom_spec
+}
