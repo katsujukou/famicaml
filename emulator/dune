@@ -3,4 +3,4 @@
 (library
  (name emulator)
  (public_name famicaml.emulator)
- (libraries stdint))
+ (libraries base stdint))

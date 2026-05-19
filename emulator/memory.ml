@@ -12,7 +12,6 @@ type memory_size =
   | MS_16KB 
   | MS_32KB 
 
-
 let size_of sz = Uint32.of_int 
   @@ match sz with 
     | MS_1KB  -> 0x0400
@@ -23,7 +22,6 @@ let size_of sz = Uint32.of_int
     | MS_32KB -> 0x8000
 
 module type MEMORY = sig
-  val repr : Bytes.t
   val size : usize_t
   val offset : usize_t 
   val read :  uint32 -> byte
@@ -34,15 +32,11 @@ let mk ~sz ~ofs =
   let usize = size_of sz in 
   let offset = Uint32.of_int ofs in
   let repr = Bytes.create (Uint32.to_int usize) in
-
   (module struct 
     let repr = repr
     let size = usize
     let offset = offset 
-
-    let int_of_addr u = 
-        Uint32.to_int (Uint32.rem (Uint32.sub u offset) usize)
-
+    let int_of_addr u = Uint32.(to_int (rem (u - offset) usize))
     let read u = Uint8.of_int @@ Bytes.get_uint8 repr (int_of_addr u)
     let write u x = Bytes.set_uint8 repr (int_of_addr u) (Uint8.to_int x)
   end : MEMORY)

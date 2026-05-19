@@ -15,7 +15,6 @@ type memory_size =
 val size_of : memory_size -> usize_t 
 
 module type MEMORY = sig
-  val repr : Bytes.t
   val size : usize_t
   val offset : usize_t 
   val read :  uint32 -> byte

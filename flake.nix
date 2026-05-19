@@ -4,9 +4,10 @@
   inputs = {
     nixpkgs.url      = "github:NixOS/nixpkgs/nixos-25.11";
     flake-utils.url  = "github:numtide/flake-utils";
+    nix-claude-code.url = "github:ryoppippi/nix-claude-code";
   };
 
-  outputs = { self, nixpkgs, flake-utils }:
+  outputs = { self, nixpkgs, flake-utils, nix-claude-code }:
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
@@ -25,7 +26,10 @@
           stdint
           js_of_ocaml
           js_of_ocaml-ppx
+          alcotest
         ];
+
+        claude-code = nix-claude-code.packages.${system}.default;
       in
       {
         devShells.default = pkgs.mkShell {
@@ -43,6 +47,7 @@
             nodejs_22
             pnpm
             binaryen
+            claude-code
           ]);
 
           shellHook = ''

@@ -9,6 +9,7 @@ depends: [
   "stdint"
   "js_of_ocaml"
   "js_of_ocaml-ppx"
+  "alcotest" {with-test & >= "1.0"}
   "odoc" {with-doc}
 ]
 build: [
