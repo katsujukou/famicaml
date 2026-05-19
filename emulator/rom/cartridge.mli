@@ -7,7 +7,12 @@ type cart_spec = {
 }
 
 type rom_spec =
-  | NROM of { prg : Bytes.t; chr : Bytes.t }
+  | NROM  of { prg: Bytes.t; chr: Bytes.t }
+    (** PRG: 16KB or 32KB 固定。CHR: 8KB 固定 ROM or RAM。 *)
+  | UNROM of { prg: Bytes.t; chr_ram: Bytes.t }
+    (** PRG: 16KB×N バンク (下位切替可・上位最終バンク固定)。CHR: 8KB RAM。 *)
+  | CNROM of { prg: Bytes.t; chr: Bytes.t }
+    (** PRG: 16KB or 32KB 固定。CHR: 8KB×N バンク切替可。 *)
 
 type t = {
   spec : cart_spec;
