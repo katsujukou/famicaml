@@ -50,10 +50,13 @@
           ]);
 
           shellHook = ''
-            echo "OCaml:          $(ocaml -version)"
-            echo "dune:           $(dune --version)"
-            echo "wasm_of_ocaml:  $(wasm_of_ocaml --version 2>/dev/null || echo n/a)"
-            echo "node:           $(node --version)"
+            # CI などスクリプト用途では FAMICAML_QUIET=1 で抑制できる。
+            if [ -z "''${FAMICAML_QUIET:-}" ]; then
+              echo "OCaml:          $(ocaml -version)"
+              echo "dune:           $(dune --version)"
+              echo "wasm_of_ocaml:  $(wasm_of_ocaml --version 2>/dev/null || echo n/a)"
+              echo "node:           $(node --version)"
+            fi
           '';
         };
 

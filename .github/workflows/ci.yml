@@ -1,0 +1,113 @@
+# FamiCaml CI
+#
+# 開発環境と同じ Nix flake シェル (devShells.default) の中で:
+#   1. OCaml フォーマットチェック (dune build @fmt)
+#   2. OCaml ビルド (emulator + wasm)
+#   3. OCaml ユニットテスト
+#   4. wasm 成果物を ui/public へコピー
+#   5. UI 依存インストール + ビルド
+# を順に走らせる。
+#
+# Cachix 設定:
+#   - https://app.cachix.org/ で `famicaml` という名前のキャッシュを作成
+#   - "Settings" → "Auth Tokens" で書き込み権限つきトークンを発行
+#   - GitHub リポジトリの Settings → Secrets → Actions に
+#     CACHIX_AUTH_TOKEN として登録
+#   トークン未設定でも CI は動くが、毎回 Nix 依存を取り直すので遅い。
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # flake.nix の shellHook が CI ログに version 行を吐かないようにする。
+  # これがないと `$( ... )` で値を拾うコマンド (pnpm store path 等) で
+  # 余計な行が混ざる。
+  FAMICAML_QUIET: "1"
+
+jobs:
+  ci:
+    name: build / test / fmt
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@v17
+        with:
+          extra-conf: |
+            experimental-features = nix-command flakes
+            accept-flake-config = true
+
+      # flake closure を GitHub Actions のローカルキャッシュへ載せる。
+      # cachix トークンが未設定でも 2 回目以降は速くなる二段構え。
+      - name: Set up magic-nix-cache
+        uses: DeterminateSystems/magic-nix-cache-action@v8
+
+      - name: Set up Cachix
+        uses: cachix/cachix-action@v15
+        with:
+          name: famicaml
+          # Token がなければ pull-only (read-only) で機能する。
+          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+
+      # devShell を一度評価して closure を温める。
+      - name: Warm up devShell
+        run: nix develop --command true
+
+      # ---- OCaml ----
+
+      - name: OCaml format check
+        # @fmt alias は差分があれば exit 1。dune fmt --check 相当。
+        run: nix develop --command dune build @fmt
+
+      - name: OCaml build (emulator + wasm)
+        run: nix develop --command dune build
+
+      - name: OCaml tests
+        run: nix develop --command dune test
+
+      # ---- UI ----
+
+      - name: Copy wasm artifacts into ui/public
+        run: nix develop --command make wasm-copy
+
+      - name: Resolve pnpm store path
+        id: pnpm-store
+        run: |
+          STORE_PATH="$(nix develop --command pnpm store path 2>/dev/null | tail -n 1)"
+          echo "path=$STORE_PATH" >> "$GITHUB_OUTPUT"
+
+      - name: Cache pnpm store
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: pnpm-${{ runner.os }}-${{ hashFiles('ui/pnpm-lock.yaml') }}
+          restore-keys: |
+            pnpm-${{ runner.os }}-
+
+      - name: UI dependencies (pnpm install)
+        working-directory: ui
+        run: nix develop --command pnpm install --frozen-lockfile
+
+      # UI テストはまだ無いので skip。pnpm test が定義され次第有効化:
+      # - name: UI tests
+      #   working-directory: ui
+      #   run: nix develop --command pnpm test
+
+      - name: UI build
+        working-directory: ui
+        run: nix develop --command pnpm run build
+
+      - name: List ui/dist
+        if: always()
+        run: ls -la ui/dist || true
