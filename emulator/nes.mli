@@ -5,18 +5,17 @@ open Famicaml_common.Nesint
 type mapper_io
 
 (** NES 本体の状態。CPU・バス・WRAM・現在挿入中のカートリッジを保持する。 *)
-type t = {
-  mutable power     : bool;
-  mutable cart      : Rom.Cartridge.t option;
-  mutable mapper    : mapper_io;
-  cpu               : Cpu.t;
-  memory_bus        : Bus.t;
-  wram              : Bytes.t;
-    (** 2KB の CPU 内蔵 RAM。eject / reset / power_off / connect すべてで保持される。 *)
-  mutable ith_nmi   : uint16;
-  mutable ith_reset : uint16;
-  mutable ith_irq   : uint16;
-}
+type t =
+  { mutable power : bool
+  ; mutable cart : Rom.Cartridge.t option
+  ; mutable mapper : mapper_io
+  ; cpu : Cpu.t
+  ; memory_bus : Bus.t
+  ; wram : Bytes.t (** 2KB の CPU 内蔵 RAM。eject / reset / power_off / connect すべてで保持される。 *)
+  ; mutable ith_nmi : uint16
+  ; mutable ith_reset : uint16
+  ; mutable ith_irq : uint16
+  }
 
 (** 電源 off・カートリッジなしの NES を生成する。
     実機で言えば箱から出してきた直後の状態。 *)

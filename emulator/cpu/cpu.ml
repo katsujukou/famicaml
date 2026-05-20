@@ -1,51 +1,49 @@
 open Famicaml_common.Nesint
-
-module R = Register 
+module R = Register
 module PS = Register.Processor_status
 module Ins = Instruction
+
 type t = Register.t
 
-let mk () = {
-  R.reg_PC = Uint16.of_int 0;
-  R.reg_A = Uint8.of_int 0;
-  R.reg_X = Uint8.of_int 0;
-  R.reg_Y = Uint8.of_int 00;
-  R.reg_P = PS.initial;
-  R.reg_SP = Uint8.of_int 0xFD;
-}
+let mk () =
+  {
+    R.reg_PC = Uint16.of_int 0;
+    R.reg_A = Uint8.of_int 0;
+    R.reg_X = Uint8.of_int 0;
+    R.reg_Y = Uint8.of_int 00;
+    R.reg_P = PS.initial;
+    R.reg_SP = Uint8.of_int 0xFD;
+  }
 
 open Logic_util
 
-let fetch_arg (bus:Bus.t) (a:Bus.addr) 
-  = Ins.(
-  function
-  | IMP -> Implied
-  | ACC -> Accumulator
-  | IMD -> Immediate (peek bus a)
-  | ZP -> Zeropage (peek bus a)
-  | ZP_X -> Zeropage_X (peek bus a)
-  | ZP_Y -> Zeropage_Y (peek bus a)
-  | ABS -> Absolute (peek_16 bus a)
-  | ABS_X -> Absolute_X (peek_16 bus a)
-  | ABS_Y -> Absolute_Y (peek_16 bus a)
-  | REL -> Relative (peek bus a)
-  | IND -> Indirect (peek_16 bus a)
-  | IND_X -> Indirect_X (peek bus a)
-  | IND_Y -> Indirect_Y (peek bus a)
-  )
+let fetch_arg (bus : Bus.t) (a : Bus.addr) =
+  Ins.(
+    function
+    | IMP -> Implied
+    | ACC -> Accumulator
+    | IMD -> Immediate (peek bus a)
+    | ZP -> Zeropage (peek bus a)
+    | ZP_X -> Zeropage_X (peek bus a)
+    | ZP_Y -> Zeropage_Y (peek bus a)
+    | ABS -> Absolute (peek_16 bus a)
+    | ABS_X -> Absolute_X (peek_16 bus a)
+    | ABS_Y -> Absolute_Y (peek_16 bus a)
+    | REL -> Relative (peek bus a)
+    | IND -> Indirect (peek_16 bus a)
+    | IND_X -> Indirect_X (peek bus a)
+    | IND_Y -> Indirect_Y (peek bus a))
 
-let fetch (bus:Bus.t) (cpu: Register.t)
-  : Ins.t
-  = let code = peek bus cpu.reg_PC in 
-    match Ins.lookup code with
-    | None -> raise Exn.Undefined_opcode 
-    | Some spec ->
-      let arg = 
+let fetch (bus : Bus.t) (cpu : Register.t) : Ins.t =
+  let code = peek bus cpu.reg_PC in
+  match Ins.lookup code with
+  | None -> raise Exn.Undefined_opcode
+  | Some spec ->
+      let arg =
         (* JMP ($XXFF) のハードウェアバグ再現
            See: https://www.nesdev.org/wiki/Instruction_reference#JMP
         *)
-        if spec.op = Ins.JMP && spec.mode = Ins.IND
-        then
+        if spec.op = Ins.JMP && spec.mode = Ins.IND then
           let vector = peek_16 bus Uint16.(cpu.reg_PC + one) in
           Ins.Absolute (peek_16_buggy bus vector)
         else fetch_arg bus Uint16.(cpu.reg_PC + one) spec.mode
@@ -56,9 +54,9 @@ let fetch (bus:Bus.t) (cpu: Register.t)
 (* ------------------------------------------------------------------ *)
 (* ディスパッチャ                                                       *)
 (* ------------------------------------------------------------------ *)
-open Logic 
+open Logic
 
-let execute (bus:Bus.t) (cpu: Register.t) ~ith_irq (inst:Ins.t) : unit =
+let execute (bus : Bus.t) (cpu : Register.t) ~ith_irq (inst : Ins.t) : unit =
   let arg = inst.arg in
   match inst.op with
   (* ロード/ストア *)
@@ -129,8 +127,8 @@ let execute (bus:Bus.t) (cpu: Register.t) ~ith_irq (inst:Ins.t) : unit =
   (* その他 *)
   | BRK -> run_brk bus cpu ~ith_irq
   | NOP -> run_nop ()
- 
-let step (bus:Bus.t) (cpu: t) ~ith_irq : int =
+
+let step (bus : Bus.t) (cpu : t) ~ith_irq : int =
   let inst = fetch bus cpu in
   execute bus cpu ~ith_irq inst;
   inst.cycles

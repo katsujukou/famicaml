@@ -1,0 +1,10 @@
+version = 0.28.1
+profile = default
+
+margin = 100
+break-infix = fit-or-vertical
+let-binding-spacing = compact
+sequence-style = terminator
+type-decl = sparse
+parens-tuple = always
+wrap-comments = false

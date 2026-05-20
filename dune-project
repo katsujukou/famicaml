@@ -3,6 +3,7 @@
 (name famicaml)
 
 (generate_opam_files true)
+(formatting (enabled_for ocaml))
 
 (package
  (name famicaml)

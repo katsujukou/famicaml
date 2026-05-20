@@ -1,7 +1,7 @@
 type error =
-  | Invalid_magic              (** 先頭4バイトが "NES\x1A" でない *)
-  | Unsupported_mapper of int  (** 対応していないマッパー番号 *)
-  | Truncated_data             (** データが必要サイズに満たない *)
+  | Invalid_magic (** 先頭4バイトが "NES\x1A" でない *)
+  | Unsupported_mapper of int (** 対応していないマッパー番号 *)
+  | Truncated_data (** データが必要サイズに満たない *)
 
 val error_to_string : error -> string
 
