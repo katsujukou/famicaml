@@ -105,7 +105,6 @@ jobs:
       #   run: nix develop --command pnpm test
 
       - name: UI build
-        working-directory: ui
         run: nix develop --command make ui-build
 
       - name: List ui/dist
