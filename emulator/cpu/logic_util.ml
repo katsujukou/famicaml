@@ -1,4 +1,4 @@
-open Stdint
+open Famicaml_common.Nesint
 
 open Register
 

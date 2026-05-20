@@ -23,7 +23,6 @@
         ocamlDeps = with ocamlPackages; [
           cmdliner
           base
-          stdint
           js_of_ocaml
           js_of_ocaml-ppx
           alcotest

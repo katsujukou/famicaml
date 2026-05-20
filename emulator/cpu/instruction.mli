@@ -1,4 +1,4 @@
-open Stdint
+open Famicaml_common.Nesint
 
 type opcode =
   | LDA | LDX | LDY | STA | STX | STY

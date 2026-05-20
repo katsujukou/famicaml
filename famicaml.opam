@@ -6,7 +6,6 @@ depends: [
   "dune" {>= "3.20"}
   "cmdliner"
   "base"
-  "stdint"
   "js_of_ocaml"
   "js_of_ocaml-ppx"
   "alcotest" {with-test & >= "1.0"}

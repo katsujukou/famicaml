@@ -12,7 +12,6 @@
  dune
  cmdliner
  base
- stdint
  js_of_ocaml
  js_of_ocaml-ppx
  (alcotest (and :with-test (>= 1.0)))))

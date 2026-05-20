@@ -1,4 +1,4 @@
-open Stdint
+open Famicaml_common.Nesint
 
 module type PS = sig
   type t = private uint8

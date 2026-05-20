@@ -1,7 +1,15 @@
 {
   "name": "famicaml-ui",
+  "namespace": true,
+  "suffix": ".res.js",
+  "jsx": {
+    "version": 4
+  },
   "sources": [
-    { "dir": "src", "subdirs": true }
+    {
+      "dir": "src",
+      "subdirs": true
+    }
   ],
   "package-specs": [
     {
@@ -9,7 +17,7 @@
       "in-source": true
     }
   ],
-  "suffix": ".res.mjs",
-  "dependencies": ["@rescript/react"],
-  "jsx": { "version": 4 }
+  "dependencies": [
+    "@rescript/react"
+  ]
 }

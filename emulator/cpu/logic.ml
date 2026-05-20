@@ -1,4 +1,4 @@
-open Stdint 
+open Famicaml_common.Nesint 
 open Register
 
 module Ins = Instruction
@@ -36,9 +36,9 @@ let push16 (bus:Bus.t) (cpu: Register.t) (v:uint16) =
   push bus cpu (Uint8.of_int (Uint16.to_int (Uint16.logand v (Uint16.of_int 0xFF))))  (* lo *)
  
 let pull16 (bus:Bus.t) (cpu: Register.t) : uint16 =
-  let lo = pull bus cpu in
-  let hi = pull bus cpu in
-  Uint16.(shift_left (Uint16.of_uint8 hi) 8 + of_uint8 lo)
+  let ll = pull bus cpu in
+  let hh = pull bus cpu in
+  Uint16.(shift_left (Uint16.of_uint8 hh) 8 + of_uint8 ll)
  
 (** オペランドから「読み出し値」を取得する。
     LDA/AND/ORA/EOR/ADC/SBC/CMP/BIT など read 系命令で共通。 *)

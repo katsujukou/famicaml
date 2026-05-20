@@ -1,4 +1,4 @@
-open Stdint
+open Famicaml_common.Nesint
 
 (* Module aliases
    Emulator.Cpu.R  = Register       (cpu.ml で module R = Register と定義)

@@ -1,4 +1,4 @@
-open Stdint
+open Famicaml_common.Nesint
 
 module R = Register 
 module PS = Register.Processor_status

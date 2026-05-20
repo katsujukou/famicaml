@@ -1,4 +1,5 @@
 (executable
  (name main)
  (modes wasm)
- (libraries famicaml.emulator))
+ (libraries famicaml.emulator js_of_ocaml)
+ (preprocess (pps js_of_ocaml-ppx)))

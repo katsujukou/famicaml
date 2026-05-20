@@ -1,8 +1,8 @@
-open Stdint 
+open Famicaml_common.Nesint 
 
 type byte = uint8
 
-type usize_t = uint32
+type usize_t = int
 
 type memory_size = 
   | MS_1KB
@@ -17,8 +17,8 @@ val size_of : memory_size -> usize_t
 module type MEMORY = sig
   val size : usize_t
   val offset : usize_t 
-  val read :  uint32 -> byte
-  val write : uint32 -> byte -> unit  
+  val read :  int -> byte
+  val write : int -> byte -> unit  
 end
 
 val mk : sz:memory_size -> ofs:int -> (module MEMORY)

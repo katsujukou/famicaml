@@ -1,4 +1,4 @@
-open Stdint
+open Famicaml_common.Nesint
 
 (** レジスタモジュール。外部からは [Emulator.Cpu.R] でアクセスできる。 *)
 module R = Register
