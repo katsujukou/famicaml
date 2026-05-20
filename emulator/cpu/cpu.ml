@@ -6,13 +6,12 @@ module Ins = Instruction
 type t = Register.t
 
 let mk () =
-  {
-    R.reg_PC = Uint16.of_int 0;
-    R.reg_A = Uint8.of_int 0;
-    R.reg_X = Uint8.of_int 0;
-    R.reg_Y = Uint8.of_int 00;
-    R.reg_P = PS.initial;
-    R.reg_SP = Uint8.of_int 0xFD;
+  { R.reg_PC = Uint16.of_int 0
+  ; R.reg_A = Uint8.of_int 0
+  ; R.reg_X = Uint8.of_int 0
+  ; R.reg_Y = Uint8.of_int 00
+  ; R.reg_P = PS.initial
+  ; R.reg_SP = Uint8.of_int 0xFD
   }
 
 open Logic_util
@@ -39,17 +38,18 @@ let fetch (bus : Bus.t) (cpu : Register.t) : Ins.t =
   match Ins.lookup code with
   | None -> raise Exn.Undefined_opcode
   | Some spec ->
-      let arg =
-        (* JMP ($XXFF) のハードウェアバグ再現
+    let arg =
+      (* JMP ($XXFF) のハードウェアバグ再現
            See: https://www.nesdev.org/wiki/Instruction_reference#JMP
         *)
-        if spec.op = Ins.JMP && spec.mode = Ins.IND then
-          let vector = peek_16 bus Uint16.(cpu.reg_PC + one) in
-          Ins.Absolute (peek_16_buggy bus vector)
-        else fetch_arg bus Uint16.(cpu.reg_PC + one) spec.mode
-      in
-      cpu.reg_PC <- Uint16.(cpu.reg_PC + of_int spec.bytes);
-      { op = spec.op; arg; cycles = spec.cycles }
+      if spec.op = Ins.JMP && spec.mode = Ins.IND
+      then (
+        let vector = peek_16 bus Uint16.(cpu.reg_PC + one) in
+        Ins.Absolute (peek_16_buggy bus vector))
+      else fetch_arg bus Uint16.(cpu.reg_PC + one) spec.mode
+    in
+    cpu.reg_PC <- Uint16.(cpu.reg_PC + of_int spec.bytes);
+    { op = spec.op; arg; cycles = spec.cycles }
 
 (* ------------------------------------------------------------------ *)
 (* ディスパッチャ                                                       *)

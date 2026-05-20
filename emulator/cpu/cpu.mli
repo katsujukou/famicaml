@@ -9,8 +9,7 @@ module PS = Register.Processor_status
 (** CPU 状態型。レジスタ群のレコード。 *)
 type t = Register.t
 
-(** 初期状態の CPU を作成する。
-    PC=0, A/X/Y=0, SP=$FD, P=I|R ($24)。 *)
+(** 初期状態の CPU を作成する。 PC=0, A/X/Y=0, SP=$FD, P=I|R ($24)。 *)
 val mk : unit -> t
 
 (** PC の示すアドレスから 1 命令をフェッチして PC を進める。 *)

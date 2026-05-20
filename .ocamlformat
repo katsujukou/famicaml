@@ -1,5 +1,5 @@
 version = 0.28.1
-profile = default
+profile = janestreet
 
 margin = 100
 break-infix = fit-or-vertical

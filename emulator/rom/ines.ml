@@ -31,8 +31,7 @@ let parse_nrom ~ofs ~prg_banks ~chr_banks data =
   in
   Ok (Cartridge.NROM { prg; chr })
 
-(** UNROM (mapper #2): PRG バンク切替、CHR-RAM 固定。
-    iNES ヘッダの chr_banks は通常 0 だが、値に関わらず CHR-RAM を用意する。 *)
+(** UNROM (mapper #2): PRG バンク切替、CHR-RAM 固定。 iNES ヘッダの chr_banks は通常 0 だが、値に関わらず CHR-RAM を用意する。 *)
 let parse_unrom ~ofs ~prg_banks data =
   let prg_size = prg_banks * prg_bank_size in
   let* () = need data (ofs + prg_size) in

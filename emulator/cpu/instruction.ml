@@ -102,9 +102,7 @@ type t =
   ; cycles : int
   }
 
-(** 1命令あたりのメタ情報。
-    bytes: オペコード込みの命令長(1〜3)
-    cycles: 基本サイクル数(ページ跨ぎ等のペナルティは実行時に加算) *)
+(** 1命令あたりのメタ情報。 bytes: オペコード込みの命令長(1〜3) cycles: 基本サイクル数(ページ跨ぎ等のペナルティは実行時に加算) *)
 type spec =
   { op : opcode
   ; mode : addressing_mode
@@ -294,8 +292,7 @@ let instruction_list =
   ; (0xEA, NOP, IMP, 1, 2)
   ]
 
-(** opcode バイト(0x00-0xFF)を添字に引く 256 要素の表。
-    未定義オペコードは None。 *)
+(** opcode バイト(0x00-0xFF)を添字に引く 256 要素の表。 未定義オペコードは None。 *)
 let mnemonic_table : spec option array =
   let tbl = Array.make 256 None in
   List.iter

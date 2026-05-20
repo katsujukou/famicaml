@@ -1,14 +1,12 @@
 open Famicaml_common.Nesint
 
-(** マッパーの read/write 関数ペア。CPU バスアドレス (0x8000-0xFFFF) を
-    受け取り、対応するバイトを読み書きする。 *)
+(** マッパーの read/write 関数ペア。CPU バスアドレス (0x8000-0xFFFF) を 受け取り、対応するバイトを読み書きする。 *)
 type mapper_io =
   { read : int -> int
   ; write : int -> int -> unit
   }
 
-(** カートリッジが挿さっていない時の状態。Open bus は実機では浮動値だが、
-    本実装では 0 で代用する。 *)
+(** カートリッジが挿さっていない時の状態。Open bus は実機では浮動値だが、 本実装では 0 で代用する。 *)
 let empty_mapper : mapper_io = { read = (fun _ -> 0); write = (fun _ _ -> ()) }
 
 type t =
@@ -40,8 +38,7 @@ let prg_read_unrom prg ~bank_lo cpu_addr =
   let ofs = (bank * 0x4000) + (cpu_addr land 0x3FFF) in
   Bytes.get_uint8 prg ofs
 
-(** Cartridge の中身に応じた mapper_io を構築する。
-    PPU 実装まで CNROM の CHR バンク切替は無視。 *)
+(** Cartridge の中身に応じた mapper_io を構築する。 PPU 実装まで CNROM の CHR バンク切替は無視。 *)
 let make_mapper (cart : Rom.Cartridge.t) : mapper_io =
   match cart.rom with
   | Rom.Cartridge.NROM { prg; _ } -> { read = prg_read_fixed prg; write = (fun _ _ -> ()) }

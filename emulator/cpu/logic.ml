@@ -38,8 +38,7 @@ let pull16 (bus : Bus.t) (cpu : Register.t) : uint16 =
   let hh = pull bus cpu in
   Uint16.(shift_left (Uint16.of_uint8 hh) 8 + of_uint8 ll)
 
-(** オペランドから「読み出し値」を取得する。
-    LDA/AND/ORA/EOR/ADC/SBC/CMP/BIT など read 系命令で共通。 *)
+(** オペランドから「読み出し値」を取得する。 LDA/AND/ORA/EOR/ADC/SBC/CMP/BIT など read 系命令で共通。 *)
 let operand_value (bus : Bus.t) (cpu : Register.t) : Ins.operand_with_mode -> uint8 = function
   | Immediate v -> v
   | Zeropage a -> peek_zp bus a
@@ -53,8 +52,7 @@ let operand_value (bus : Bus.t) (cpu : Register.t) : Ins.operand_with_mode -> ui
   | Accumulator -> cpu.reg_A
   | _ -> raise Exn.Invalid_addressing_mode
 
-(** オペランドの「実効アドレス」を計算する。
-    STA/STX/STY/INC/DEC/ASL/LSR/ROL/ROR などメモリ書き込み命令で使う。
+(** オペランドの「実効アドレス」を計算する。 STA/STX/STY/INC/DEC/ASL/LSR/ROL/ROR などメモリ書き込み命令で使う。
     Accumulator/Immediate/Implied はアドレスを持たない。 *)
 let effective_addr (bus : Bus.t) (cpu : Register.t) : Ins.operand_with_mode -> uint16 = function
   | Zeropage a -> Uint16.of_uint8 a
@@ -141,8 +139,7 @@ let run_adc bus cpu arg =
        ]
        cpu.reg_P
 
-(** SBC: A = A - M - (1-C)。6502 では SBC は ADC に M のビット反転を
-    入れたものと等価。 *)
+(** SBC: A = A - M - (1-C)。6502 では SBC は ADC に M のビット反転を 入れたものと等価。 *)
 let run_sbc bus cpu arg =
   let m = operand_value bus cpu arg in
   let a = cpu.reg_A in
