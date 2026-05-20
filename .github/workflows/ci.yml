@@ -106,7 +106,7 @@ jobs:
 
       - name: UI build
         working-directory: ui
-        run: nix develop --command pnpm run build
+        run: nix develop --command make ui-build
 
       - name: List ui/dist
         if: always()
