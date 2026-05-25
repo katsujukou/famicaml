@@ -26,3 +26,10 @@ type t =
   { spec : cart_spec
   ; rom : rom_spec
   }
+
+let chr_bytes cart =
+  match cart.rom with
+  | NROM { chr; _ } -> chr
+  | UNROM { chr_ram; _ } -> chr_ram
+  | CNROM { chr; _ } -> chr
+;;

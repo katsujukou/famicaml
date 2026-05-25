@@ -26,3 +26,8 @@ type t =
   { spec : cart_spec
   ; rom : rom_spec
   }
+
+(** カートリッジの CHR バイト列を取り出す。
+    NROM/CNROM では CHR-ROM、UNROM では CHR-RAM (初期値は全 0) を返す。
+    どのマッパーでも長さは 8KB 以上が保証される (iNES パーサが担保)。 *)
+val chr_bytes : t -> Bytes.t

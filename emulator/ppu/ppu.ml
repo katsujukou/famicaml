@@ -6,6 +6,8 @@ open Famicaml_common.Nesint
 module Register = Register
 module Nametable = Nametable
 module Config = Config
+module Pattern_table = Pattern_table
+module Palette = Palette
 
 (* ------------------------------------------------------------------ *)
 (* Ppu.t — PPU 本体の状態                                              *)
