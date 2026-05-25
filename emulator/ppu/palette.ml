@@ -32,7 +32,6 @@ let default_pal_string =
     ; "\xCC\xD2\x78\xB4\xDE\x78\xA8\xE2\x90\x98\xE2\xB4"
     ; "\xA0\xD6\xE4\xA0\xA2\xA0\x00\x00\x00\x00\x00\x00"
     ]
-;;
 
 let () = assert (String.length default_pal_string = pal_bytes)
 let default () = Bytes.of_string default_pal_string
@@ -42,7 +41,6 @@ let check_idx idx =
   then
     invalid_arg
       (Printf.sprintf "Palette: index %d out of range [0,%d)" idx n_colors)
-;;
 
 let color m idx =
   check_idx idx;
@@ -50,8 +48,7 @@ let color m idx =
   let r = Bytes.get_uint8 m off in
   let g = Bytes.get_uint8 m (off + 1) in
   let b = Bytes.get_uint8 m (off + 2) in
-  r, g, b
-;;
+  (r, g, b)
 
 let clip x = if x < 0 then 0 else if x > 255 then 255 else x
 
@@ -61,21 +58,16 @@ let set_color m idx ~r ~g ~b =
   Bytes.set_uint8 m off (clip r);
   Bytes.set_uint8 m (off + 1) (clip g);
   Bytes.set_uint8 m (off + 2) (clip b)
-;;
 
 let of_pal_bytes b =
   let len = Bytes.length b in
   if len <> pal_bytes
   then
     Error
-      (Printf.sprintf
-         ".pal must be exactly %d bytes (got %d)"
-         pal_bytes
-         len)
-  else (
+      (Printf.sprintf ".pal must be exactly %d bytes (got %d)" pal_bytes len)
+  else
     (* 入力をコピーして所有権を切る *)
-    Ok (Bytes.copy b))
-;;
+    Ok (Bytes.copy b)
 
 let to_pal_bytes m = Bytes.copy m
 
@@ -100,4 +92,3 @@ let pixels_to_rgba pixels ~master ~sub =
     Bytes.set_uint8 out (o + 3) 0xFF
   done;
   out
-;;

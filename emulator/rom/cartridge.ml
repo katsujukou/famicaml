@@ -32,4 +32,3 @@ let chr_bytes cart =
   | NROM { chr; _ } -> chr
   | UNROM { chr_ram; _ } -> chr_ram
   | CNROM { chr; _ } -> chr
-;;

@@ -17,7 +17,6 @@ let bytes_of_uint8array (arr : Typed_array.uint8Array Js.t) : bytes =
     Bytes.set_uint8 b i (Typed_array.unsafe_get arr i)
   done;
   b
-;;
 
 (** OCaml の bytes を JS の Uint8Array に変換する。
     ImageData コンストラクタは Uint8ClampedArray を要求するが、
@@ -31,7 +30,6 @@ let uint8array_of_bytes (b : bytes) : Typed_array.uint8Array Js.t =
     Typed_array.set arr i (Bytes.get_uint8 b i)
   done;
   arr
-;;
 
 let mirror_to_string = function
   | Cart.H -> "horizontal"
@@ -89,6 +87,10 @@ let state_js () =
     val nmiVector = Uint16.to_int nes.ith_nmi
     val irqVector = Uint16.to_int nes.ith_irq
     val pc = Uint16.to_int nes.cpu.reg_PC
+    val cpuCycles = nes.cpu.cycles
+    val ppuFrame = nes.ppu.frame
+    val ppuScanline = nes.ppu.scanline
+    val ppuDot = nes.ppu.dot
   end
 
 (** パターンテーブル ($0000-$0FFF または $1000-$1FFF) を 128×128 RGBA に
@@ -115,14 +117,14 @@ let pattern_table_js (idx : int) =
            val height = 128
            val rgba = uint8array_of_bytes rgba
         end))
-;;
 
 (* ------------------------------------------------------------------ *)
 (* Palette API                                                          *)
 (* ------------------------------------------------------------------ *)
 
 (** マスターパレットを .pal 形式 (192 byte) で取得する。 *)
-let get_master_palette () = uint8array_of_bytes (Palette.to_pal_bytes !master_palette)
+let get_master_palette () =
+  uint8array_of_bytes (Palette.to_pal_bytes !master_palette)
 
 (** .pal バイト列を読み込んでマスターパレットを差し替える。
     成功なら true、失敗 (サイズ不正等) なら false。 *)
@@ -133,7 +135,6 @@ let set_master_palette (arr : Typed_array.uint8Array Js.t) =
     master_palette := m;
     Js._true
   | Error _ -> Js._false
-;;
 
 (** マスターパレットを内蔵デフォルトに戻す。 *)
 let reset_master_palette () = master_palette := Palette.default ()
@@ -141,7 +142,6 @@ let reset_master_palette () = master_palette := Palette.default ()
 (** マスターインデックス [idx] (0..63) の色を更新する。 *)
 let set_master_color (idx : int) (r : int) (g : int) (b : int) =
   if idx >= 0 && idx < 64 then Palette.set_color !master_palette idx ~r ~g ~b
-;;
 
 (** Pattern viewer 用 sub palette の 4 スロットを 4 byte で取得する。
     各 byte がマスターインデックス 0..63。 *)
@@ -149,14 +149,12 @@ let get_viewer_sub () =
   let b = Bytes.create 4 in
   Array.iteri (fun i x -> Bytes.set_uint8 b i (x land 0x3F)) !viewer_sub;
   uint8array_of_bytes b
-;;
 
 (** Pattern viewer 用 sub palette のスロット [slot] (0..3) に
     マスターインデックス [master_idx] (0..63) をアサインする。 *)
 let set_viewer_sub_slot (slot : int) (master_idx : int) =
   if slot >= 0 && slot < 4 && master_idx >= 0 && master_idx < 64
-  then (!viewer_sub).(slot) <- master_idx
-;;
+  then !viewer_sub.(slot) <- master_idx
 
 let load_rom (arr : Typed_array.uint8Array Js.t) =
   let data = bytes_of_uint8array arr in
@@ -185,12 +183,17 @@ let () =
        val powerOff = Js.wrap_callback (fun () -> Nes.power_off nes)
        val state = Js.wrap_callback state_js
        val patternTable = Js.wrap_callback pattern_table_js
+       val runFrame = Js.wrap_callback (fun () -> Nes.run_until_frame nes)
+       val tick = Js.wrap_callback (fun () -> Nes.tick nes)
        val getMasterPalette = Js.wrap_callback get_master_palette
        val setMasterPalette = Js.wrap_callback set_master_palette
        val resetMasterPalette = Js.wrap_callback reset_master_palette
+
        val setMasterColor =
          Js.wrap_callback (fun idx r g b -> set_master_color idx r g b)
+
        val getViewerSub = Js.wrap_callback get_viewer_sub
+
        val setViewerSubSlot =
          Js.wrap_callback (fun slot master_idx ->
            set_viewer_sub_slot slot master_idx)

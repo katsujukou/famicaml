@@ -19,7 +19,18 @@ type t =
   ; internal : Register.Ppu_internal.t (* Loopy v/t/x/w *)
   ; mutable oam_addr : uint8 (* $2003 *)
   ; mutable read_buffer : uint8 (* $2007 の 1 バイト遅延バッファ *)
-  ; mutable open_bus : uint8 (* 直近 CPU データバス値 *)
+  ; mutable open_bus : uint8
+    (* 直近 CPU データバス値 *)
+    (* ----- スキャンライン進行 (Phase A6) ----- *)
+  ; mutable dot : int (* 0..340 *)
+  ; mutable scanline : int (* 0..261 (261 は pre-render) *)
+  ; mutable frame : int (* 起動からのフレーム数 *)
+  ; mutable nmi_request : bool
+    (** vblank 突入時かつ PPUCTRL.V=1 なら立つ。CPU へ転写されたら
+            呼び出し側 (Nes) がクリアする想定。 *)
+  ; mutable frame_complete : bool
+    (** vblank 突入 (scanline 241 dot 1) に達した瞬間に立つ。
+            run_until_frame が観測してクリアする. *)
   }
 
 let mk () =
@@ -30,6 +41,11 @@ let mk () =
   ; oam_addr = Uint8.zero
   ; read_buffer = Uint8.zero
   ; open_bus = Uint8.zero
+  ; dot = 0
+  ; scanline = 0
+  ; frame = 0
+  ; nmi_request = false
+  ; frame_complete = false
   }
 
 (* ------------------------------------------------------------------ *)
@@ -175,4 +191,43 @@ let cpu_write ppu (addr : uint16) (byte : uint8) : unit =
   | 5 -> write_scroll ppu byte
   | 6 -> write_addr ppu byte
   | 7 -> write_data ppu byte
-  | _ -> () (* $2002 への write は無視 (open_bus 更新は冒頭で済み) *)
+  | _ -> ()
+(* $2002 への write は無視 (open_bus 更新は冒頭で済み) *)
+
+(* ------------------------------------------------------------------ *)
+(* スキャンライン進行 (Phase A6)                                        *)
+(*                                                                     *)
+(* NES PPU は 262 scanline × 341 dot = 89342 dot/frame で進む。        *)
+(*   scanline 0..239: 可視 (rendering)                                  *)
+(*   scanline 240:    post-render (idle)                                *)
+(*   scanline 241:    vblank 開始 (dot 1 で vblank flag セット)         *)
+(*   scanline 241..260: vblank                                          *)
+(*   scanline 261:    pre-render (dot 1 で vblank/sprite0/overflow クリア) *)
+(*                                                                     *)
+(* 描画ピクセルの生成はまだ実装しない (Phase B 以降)。                  *)
+(* ------------------------------------------------------------------ *)
+
+(** PPU を 1 dot 進める。タイミングイベント (vblank 突入・終了) を発火する。 *)
+let step (ppu : t) : unit =
+  (* (1) dot/scanline 進行 *)
+  let next_dot = ppu.dot + 1 in
+  if next_dot < 341
+  then ppu.dot <- next_dot
+  else (
+    ppu.dot <- 0;
+    let next_sl = ppu.scanline + 1 in
+    if next_sl < 262
+    then ppu.scanline <- next_sl
+    else (
+      ppu.scanline <- 0;
+      ppu.frame <- ppu.frame + 1));
+  (* (2) edge events @ new position *)
+  if ppu.scanline = 241 && ppu.dot = 1
+  then (
+    ppu.status <- { ppu.status with vblank_flag = true };
+    if ppu.ctrl.enable_nmi then ppu.nmi_request <- true;
+    ppu.frame_complete <- true);
+  if ppu.scanline = 261 && ppu.dot = 1
+  then
+    ppu.status
+    <- { vblank_flag = false; sprite_0_hit = false; sprite_overflow = false }

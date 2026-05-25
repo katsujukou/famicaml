@@ -14,6 +14,11 @@ type intervalId
 @val external setInterval: (unit => unit, int) => intervalId = "setInterval"
 @val external clearInterval: intervalId => unit = "clearInterval"
 
+type rafId
+@val external requestAnimationFrame: (float => unit) => rafId = "requestAnimationFrame"
+@val external cancelAnimationFrame: rafId => unit = "cancelAnimationFrame"
+@val external performanceNow: unit => float = "performance.now"
+
 type fileList
 @get external fileListLength: fileList => int = "length"
 @get_index external fileListItem: (fileList, int) => file = ""
@@ -71,6 +76,10 @@ type nesState = {
   nmiVector: int,
   irqVector: int,
   pc: int,
+  cpuCycles: int,
+  ppuFrame: int,
+  ppuScanline: int,
+  ppuDot: int,
 }
 
 type loadResult = {
@@ -99,6 +108,8 @@ type famiCamlApi = {
   setMasterColor: (int, int, int, int) => unit,
   getViewerSub: unit => uint8Array,
   setViewerSubSlot: (int, int) => unit,
+  runFrame: unit => unit,
+  tick: unit => unit,
 }
 
 @val @scope("globalThis") external famiCaml: Nullable.t<famiCamlApi> = "FamiCaml"
@@ -254,6 +265,12 @@ module App = {
     let (sub, setSub) = React.useState(() => initialSub)
     let (activeSlot, setActiveSlot) = React.useState(() => 0)
     let (showCode, setShowCode) = React.useState(() => false)
+    let (running, setRunning) = React.useState(() => false)
+    let (fps, setFps) = React.useState(() => 0.0)
+    let runningRef = React.useRef(false)
+    let rafIdRef = React.useRef(None)
+    let lastFrameTimeRef = React.useRef(0.0)
+    let frameCountRef = React.useRef(0)
 
     /* wasm_of_ocaml は wasm モジュールを非同期に取得・初期化するため、
        React の初回 mount より遅く globalThis.FamiCaml が立つことがある。
@@ -362,6 +379,65 @@ module App = {
     let onPowerOn = _ => withApi(api => api.powerOn())
     let onPowerOff = _ => withApi(api => api.powerOff())
 
+    /* requestAnimationFrame ベースの実行ループ.
+       1 RAF tick = 1 NES フレーム (= 約 29780 CPU cycle).
+       FPS は直近 1 秒間のフレーム数を計測して表示. */
+    let rec rafLoop = _ts => {
+      if runningRef.current {
+        switch Nullable.toOption(famiCaml) {
+        | Some(api) =>
+          api.runFrame()
+          frameCountRef.current = frameCountRef.current + 1
+          let now = performanceNow()
+          let elapsed = now -. lastFrameTimeRef.current
+          if elapsed >= 1000.0 {
+            setFps(_ => Float.fromInt(frameCountRef.current) *. 1000.0 /. elapsed)
+            frameCountRef.current = 0
+            lastFrameTimeRef.current = now
+          }
+          setState(_ => Some(api.state()))
+        | None => ()
+        }
+        rafIdRef.current = Some(requestAnimationFrame(rafLoop))
+      }
+    }
+
+    let startRun = () => {
+      if !runningRef.current {
+        runningRef.current = true
+        setRunning(_ => true)
+        lastFrameTimeRef.current = performanceNow()
+        frameCountRef.current = 0
+        rafIdRef.current = Some(requestAnimationFrame(rafLoop))
+      }
+    }
+
+    let stopRun = () => {
+      runningRef.current = false
+      setRunning(_ => false)
+      switch rafIdRef.current {
+      | Some(id) =>
+        cancelAnimationFrame(id)
+        rafIdRef.current = None
+      | None => ()
+      }
+    }
+
+    let onRun = _ => startRun ()
+    let onStop = _ => stopRun ()
+    let onStep = _ =>
+      switch Nullable.toOption(famiCaml) {
+      | Some(api) =>
+        api.runFrame()
+        setState(_ => Some(api.state()))
+      | None => ()
+      }
+
+    /* unmount で必ず止める */
+    React.useEffect0(() => {
+      Some(() => stopRun ())
+    })
+
     let onExportPal = _ =>
       switch Nullable.toOption(famiCaml) {
       | Some(api) => downloadPal(api.getMasterPalette())
@@ -427,6 +503,12 @@ module App = {
           {renderRow("RESET", hex16(s.resetVector))}
           {renderRow("NMI", hex16(s.nmiVector))}
           {renderRow("IRQ", hex16(s.irqVector))}
+          {renderRow("CPU cycles", Int.toString(s.cpuCycles))}
+          {renderRow("PPU frame", Int.toString(s.ppuFrame))}
+          {renderRow(
+            "PPU scanline/dot",
+            Int.toString(s.ppuScanline) ++ " / " ++ Int.toString(s.ppuDot),
+          )}
         </dl>
         {switch Nullable.toOption(s.cart) {
         | Some(c) =>
@@ -531,6 +613,27 @@ module App = {
         <button onClick=onPowerOff style=buttonStyle> {React.string("Power OFF")} </button>
         <button onClick=onReset style=buttonStyle> {React.string("Reset")} </button>
         <button onClick=onEject style=buttonStyle> {React.string("Eject")} </button>
+      </section>
+      <section
+        style={{
+          marginTop: "1rem",
+          display: "flex",
+          alignItems: "center",
+          gap: "0.5rem",
+        }}>
+        {running
+          ? <button onClick=onStop style=buttonStyle>
+              {React.string("⏸ Stop")}
+            </button>
+          : <button onClick=onRun style=buttonStyle>
+              {React.string("▶ Run (60 fps)")}
+            </button>}
+        <button onClick=onStep style=buttonStyle> {React.string("⏭ Step 1 frame")} </button>
+        <span style={{color: "#666", fontFamily: "monospace", fontSize: "0.9rem"}}>
+          {React.string(
+            "FPS: " ++ Float.toFixed(fps, ~digits=1),
+          )}
+        </span>
       </section>
       {switch lastError {
       | Some(msg) =>

@@ -14,6 +14,7 @@ type t =
   ; mutable cart : Rom.Cartridge.t option
   ; mutable mapper : mapper_io
   ; cpu : Cpu.t
+  ; ppu : Ppu.t
   ; memory_bus : Bus.t
   ; wram : Bytes.t
   ; mutable ith_nmi : uint16
@@ -54,23 +55,15 @@ let make_mapper (cart : Rom.Cartridge.t) : mapper_io =
 
 (* ------------------------------------------------------------------ *)
 (* メモリマップ                                                         *)
+(*                                                                     *)
+(* CPU bus address space:                                              *)
+(*   $0000-$1FFF: WRAM (2KB, mirrored every 2KB)                       *)
+(*   $2000-$3FFF: PPU registers (8 bytes, mirrored every 8 bytes)      *)
+(*   $4000-$401F: APU & I/O — 未実装、Out_of_range                     *)
+(*   $4020-$5FFF: cart expansion — 未実装、Out_of_range                *)
+(*   $6000-$7FFF: cart SRAM   — 未実装、Out_of_range                   *)
+(*   $8000-$FFFF: cart PRG-ROM (mapper 経由)                           *)
 (* ------------------------------------------------------------------ *)
-
-type memory_section =
-  { from : Memory.usize_t (* 0x0000 は u16 上自明なため未読 *)
-  ; to_ : Memory.usize_t
-  }
-[@@warning "-69"]
-
-type memory_map_t =
-  { wram : memory_section
-  ; prg_rom : memory_section
-  }
-
-let memory_map =
-  { wram = { from = 0x0000; to_ = 0x1FFF }
-  ; prg_rom = { from = 0x8000; to_ = 0xFFFF }
-  }
 
 (* ------------------------------------------------------------------ *)
 (* バス組み立て                                                         *)
@@ -78,37 +71,49 @@ let memory_map =
 
 let mk () =
   let wram = Bytes.create 0x0800 in
-  (* バスのクロージャから自分自身 (nes.mapper) を参照するために、
+  (* バスのクロージャから自分自身 (nes.mapper, nes.ppu) を参照するために、
      初期化の二相パターンで自参照を実現する。 *)
   let nes_ref : t option ref = ref None in
-  let current_mapper () =
+  let current_nes () =
     match !nes_ref with
-    | Some n -> n.mapper
-    | None -> empty_mapper (* mk の中での read/write は呼ばれない *)
+    | Some n -> n
+    | None ->
+      failwith
+        "Nes.mk: bus closure called before nes_ref was set (should not happen)"
   in
   let bus_read_access p =
     let u = Uint16.to_int p in
-    if u <= memory_map.wram.to_
-    then Uint8.of_int (Bytes.get_uint8 wram (Uint16.to_int p land 0x07FF))
-    else if u >= memory_map.prg_rom.from
-    then Uint8.of_int ((current_mapper ()).read (Uint16.to_int p))
+    if u < 0x2000
+    then
+      (* WRAM (2KB mirror) *)
+      Uint8.of_int (Bytes.get_uint8 wram (u land 0x07FF))
+    else if u < 0x4000
+    then
+      (* PPU registers (8 byte mirror; addr land 0x07 で dispatch) *)
+      Ppu.cpu_read (current_nes ()).ppu p
+    else if u >= 0x8000
+    then Uint8.of_int ((current_nes ()).mapper.read u)
     else raise Exn.Out_of_range
   in
   let bus_write_access p x =
     let u = Uint16.to_int p in
-    if u <= memory_map.wram.to_
-    then Bytes.set_uint8 wram (Uint16.to_int p land 0x07FF) (Uint8.to_int x)
-    else if u >= memory_map.prg_rom.from
-    then (current_mapper ()).write (Uint16.to_int p) (Uint8.to_int x)
+    if u < 0x2000
+    then Bytes.set_uint8 wram (u land 0x07FF) (Uint8.to_int x)
+    else if u < 0x4000
+    then Ppu.cpu_write (current_nes ()).ppu p x
+    else if u >= 0x8000
+    then (current_nes ()).mapper.write u (Uint8.to_int x)
     else raise Exn.Out_of_range
   in
   let bus = Bus.mk ~read:bus_read_access ~write:bus_write_access in
   let cpu = Cpu.mk () in
+  let ppu = Ppu.mk () in
   let nes =
     { power = false
     ; cart = None
     ; mapper = empty_mapper
     ; cpu
+    ; ppu
     ; memory_bus = bus
     ; wram
     ; ith_nmi = Uint16.zero
@@ -152,18 +157,45 @@ let eject (nes : t) =
   nes.ith_nmi <- Uint16.zero;
   nes.ith_reset <- Uint16.zero;
   nes.ith_irq <- Uint16.zero
+
 (* WRAM および CPU レジスタは敢えて触らない: 256W グリッチを再現するには
      ここで状態を残す必要がある。 *)
 
 let reset (nes : t) =
-  (* 実機ではさらに SP -= 3, P |= I が起きるが、ゲームのリセットコードが
-     ほぼ必ず SP/P を初期化し直すため、本実装では PC のみ更新する。
-     A/X/Y/SP/P と WRAM はそのまま保持される。 *)
   refresh_vectors nes;
-  nes.cpu.reg_PC <- nes.ith_reset
+  (* Pipeline の 7 cycle RESET シーケンスを同期的に消化する。
+     A/X/Y/SP/P (の I 以外) と WRAM はそのまま保持される。 *)
+  Cpu.request_reset nes.cpu;
+  let _ : int = Cpu.step_instruction nes.memory_bus nes.cpu in
+  ()
 
 let power_on (nes : t) =
   nes.power <- true;
   reset nes
 
 let power_off (nes : t) = nes.power <- false
+
+(* ------------------------------------------------------------------ *)
+(* ロックステップ実行 (Phase A6)                                        *)
+(*                                                                     *)
+(* CPU 1 cycle = PPU 3 dot。PPU が vblank で nmi_request を立てたら    *)
+(* CPU に転写する。run_until_frame は次の vblank 開始まで tick し続ける. *)
+(* ------------------------------------------------------------------ *)
+
+(** 1 CPU cycle 進める。PPU も 3 dot 進む。NMI 発火を CPU に転写する。 *)
+let tick (nes : t) : unit =
+  Cpu.tick nes.memory_bus nes.cpu;
+  Ppu.step nes.ppu;
+  Ppu.step nes.ppu;
+  Ppu.step nes.ppu;
+  if nes.ppu.nmi_request
+  then (
+    nes.ppu.nmi_request <- false;
+    Cpu.request_nmi nes.cpu)
+
+(** 次の vblank 開始 (= 1 フレーム完了) まで tick し続ける。 *)
+let run_until_frame (nes : t) : unit =
+  nes.ppu.frame_complete <- false;
+  while not nes.ppu.frame_complete do
+    tick nes
+  done

@@ -1,6 +1,7 @@
 open Famicaml_common.Nesint
 module Cart = Emulator.Rom.Cartridge
 module Nes = Emulator.Nes
+module Cpu = Emulator.Cpu
 module Exn = Emulator.Exn
 
 (* ------------------------------------------------------------------ *)
@@ -140,8 +141,10 @@ let test_wram_roundtrip () =
 let test_unmapped_raises () =
   let _, cart = make_nrom_cart ~prg_kb:16 () in
   let nes = nes_with cart in
-  Alcotest.check_raises "$2000 read" Exn.Out_of_range (fun () ->
-    ignore (bus_read_u8 nes 0x2000));
+  (* $2000-$3FFF は PPU に dispatch されるので raise しない (PPU テスト参照).
+     $4000-$401F (APU/IO) や $4020-$7FFF (expansion) は未実装で raise. *)
+  Alcotest.check_raises "$4020 read" Exn.Out_of_range (fun () ->
+    ignore (bus_read_u8 nes 0x4020));
   Alcotest.check_raises "$5000 write" Exn.Out_of_range (fun () ->
     bus_write_u8 nes 0x5000 0)
 
@@ -231,6 +234,96 @@ let test_connect_invalid_magic () =
   | _ -> Alcotest.fail "expected Invalid_magic"
 
 (* ------------------------------------------------------------------ *)
+(* CPU↔PPU lockstep (Phase A6)                                         *)
+(* ------------------------------------------------------------------ *)
+
+(* PRG に NOP を埋め尽くした 16KB を作る。reset vector も埋めておく. *)
+let nrom_with_nop_loop ~reset_vec =
+  let prg, cart = make_nrom_cart ~prg_kb:16 () in
+  Bytes.fill prg 0 (Bytes.length prg) '\xEA' (* NOP *);
+  set_vectors prg ~nmi:0 ~reset:reset_vec ~irq:0;
+  cart
+
+let test_tick_advances_cpu_1_ppu_3 () =
+  let cart = nrom_with_nop_loop ~reset_vec:0x8000 in
+  let nes = Nes.mk () in
+  Nes.connect_cartridge nes cart;
+  Nes.power_on nes;
+  let cpu_start = nes.cpu.cycles in
+  let ppu_dot_start = nes.ppu.dot in
+  let ppu_sl_start = nes.ppu.scanline in
+  Nes.tick nes;
+  Alcotest.(check int) "CPU +1 cycle" 1 (nes.cpu.cycles - cpu_start);
+  (* PPU が 3 dot 進む (scanline 越えも考慮) *)
+  let advanced =
+    ((nes.ppu.scanline - ppu_sl_start) * 341) + (nes.ppu.dot - ppu_dot_start)
+  in
+  Alcotest.(check int) "PPU +3 dot" 3 advanced
+
+(* vblank に達すると frame_complete + nmi_request が立つ.
+   PPUCTRL.V=1 で NMI enable した状態で 1 フレーム回す. *)
+let test_run_until_frame_fires_vblank () =
+  let cart = nrom_with_nop_loop ~reset_vec:0x8000 in
+  let nes = Nes.mk () in
+  Nes.connect_cartridge nes cart;
+  Nes.power_on nes;
+  (* PPUCTRL.V を立てる (LDA #$80 ; STA $2000) を直接バス経由で書き込む *)
+  nes.memory_bus.write (Uint16.of_int 0x2000) (Uint8.of_int 0x80);
+  Nes.run_until_frame nes;
+  Alcotest.(check bool)
+    "frame_complete (set on vblank entry)"
+    true
+    nes.ppu.frame_complete;
+  Alcotest.(check bool) "vblank flag set" true nes.ppu.status.vblank_flag;
+  Alcotest.(check int) "scanline = 241" 241 nes.ppu.scanline;
+  Alcotest.(check int) "dot = 1" 1 nes.ppu.dot
+
+(* 1 フレームあたり ≒ 29780 CPU cycle (89342 PPU dot / 3) が消費される. *)
+let test_run_until_frame_cycle_budget () =
+  let cart = nrom_with_nop_loop ~reset_vec:0x8000 in
+  let nes = Nes.mk () in
+  Nes.connect_cartridge nes cart;
+  Nes.power_on nes;
+  let c_start = nes.cpu.cycles in
+  Nes.run_until_frame nes;
+  let consumed = nes.cpu.cycles - c_start in
+  (* vblank 開始までは (241 * 341 + 1) dot = 82182 dot ≒ 27394 CPU cycle.
+     スタート位置 (dot=0, sl=0) からなので、ピッタリでない場合があるが
+     誤差は十分小さい. *)
+  Alcotest.(check bool)
+    (Printf.sprintf "27000 < cycles=%d < 28000" consumed)
+    true
+    (consumed > 27000 && consumed < 28000)
+
+(* PPU が NMI を上げたら次の CPU 命令境界で NMI シーケンスが走る.
+   reset vector の手前に LDA #$80 ; STA $2000 を仕込んでから run_until_frame. *)
+let test_ppu_nmi_propagates_to_cpu () =
+  let prg, cart = make_nrom_cart ~prg_kb:16 () in
+  (* PRG の先頭に: LDA #$80 ($A9 $80) ; STA $2000 ($8D $00 $20) ; loop NOP *)
+  Bytes.set_uint8 prg 0 0xA9;
+  Bytes.set_uint8 prg 1 0x80;
+  Bytes.set_uint8 prg 2 0x8D;
+  Bytes.set_uint8 prg 3 0x00;
+  Bytes.set_uint8 prg 4 0x20;
+  for i = 5 to Bytes.length prg - 7 do
+    Bytes.set_uint8 prg i 0xEA
+  done;
+  (* reset vector: $8000 *)
+  set_vectors prg ~nmi:0x9000 ~reset:0x8000 ~irq:0;
+  let nes = Nes.mk () in
+  Nes.connect_cartridge nes cart;
+  Nes.power_on nes;
+  (* run 1 frame: NMI が発火、PC が NMI ベクタ ($9000) に飛んでいるはず *)
+  Nes.run_until_frame nes;
+  (* run_until_frame は vblank 開始で抜けるが、まだ CPU が NMI を実行する
+     には次の命令境界まで進む必要がある。さらに 1 命令進める. *)
+  let _ : int = Cpu.step_instruction nes.memory_bus nes.cpu in
+  Alcotest.(check int)
+    "PC = NMI vector $9000"
+    0x9000
+    (Uint16.to_int nes.cpu.reg_PC)
+
+(* ------------------------------------------------------------------ *)
 (* 登録                                                                 *)
 (* ------------------------------------------------------------------ *)
 
@@ -267,5 +360,23 @@ let () =
     ; ( "Ines.parse 経由の connect"
       , [ Alcotest.test_case "正常 iNES" `Quick test_connect_from_bytes
         ; Alcotest.test_case "invalid magic" `Quick test_connect_invalid_magic
+        ] )
+    ; ( "CPU↔PPU lockstep"
+      , [ Alcotest.test_case
+            "tick: CPU +1 cycle, PPU +3 dot"
+            `Quick
+            test_tick_advances_cpu_1_ppu_3
+        ; Alcotest.test_case
+            "run_until_frame で vblank 突入"
+            `Quick
+            test_run_until_frame_fires_vblank
+        ; Alcotest.test_case
+            "1 フレーム ≒ 29780 CPU cycle"
+            `Quick
+            test_run_until_frame_cycle_budget
+        ; Alcotest.test_case
+            "PPU の NMI が CPU PC を NMI ベクタへ"
+            `Quick
+            test_ppu_nmi_propagates_to_cpu
         ] )
     ]

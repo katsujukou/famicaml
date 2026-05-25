@@ -15,7 +15,10 @@ let test_default_known_colors () =
   let m = P.default () in
   (* 0x00: 中間グレー (0x54, 0x54, 0x54) *)
   let r, g, b = P.color m 0x00 in
-  Alcotest.(check (triple int int int)) "0x00 = (54,54,54)" (0x54, 0x54, 0x54) (r, g, b);
+  Alcotest.(check (triple int int int))
+    "0x00 = (54,54,54)"
+    (0x54, 0x54, 0x54)
+    (r, g, b);
   (* 0x0F: 黒 *)
   let r, g, b = P.color m 0x0F in
   Alcotest.(check (triple int int int)) "0x0F = (0,0,0)" (0, 0, 0) (r, g, b);
@@ -49,7 +52,10 @@ let test_set_color_clip () =
   let m = P.default () in
   P.set_color m 0x01 ~r:300 ~g:(-50) ~b:255;
   let r, g, b = P.color m 0x01 in
-  Alcotest.(check (triple int int int)) "clipped to [0,255]" (255, 0, 255) (r, g, b)
+  Alcotest.(check (triple int int int))
+    "clipped to [0,255]"
+    (255, 0, 255)
+    (r, g, b)
 
 let test_color_out_of_range () =
   let m = P.default () in
@@ -76,7 +82,10 @@ let test_pal_roundtrip () =
     for i = 0 to 63 do
       let c1 = P.color m i in
       let c2 = P.color m' i in
-      Alcotest.(check (triple int int int)) (Printf.sprintf "color %02X" i) c1 c2
+      Alcotest.(check (triple int int int))
+        (Printf.sprintf "color %02X" i)
+        c1
+        c2
     done
 
 let test_pal_wrong_size () =
@@ -141,7 +150,10 @@ let test_pixels_to_rgba_wraps () =
   let rgba = P.pixels_to_rgba pixels ~master:m ~sub in
   (* index 0, 1, 2 はすべて sub[0] = 0x0F = 黒 *)
   for i = 0 to 2 do
-    Alcotest.(check int) (Printf.sprintf "p%d R = 0" i) 0 (Bytes.get_uint8 rgba (i * 4))
+    Alcotest.(check int)
+      (Printf.sprintf "p%d R = 0" i)
+      0
+      (Bytes.get_uint8 rgba (i * 4))
   done;
   (* index 3 は sub[3] = 0x30 = 白 *)
   Alcotest.(check int) "p99 R = 0xEC" 0xEC (Bytes.get_uint8 rgba 12)
@@ -168,25 +180,42 @@ let () =
     [ ( "default"
       , [ Alcotest.test_case "size = 192 byte" `Quick test_default_size
         ; Alcotest.test_case "代表的な既知色" `Quick test_default_known_colors
-        ; Alcotest.test_case "default () は毎回新インスタンス"
+        ; Alcotest.test_case
+            "default () は毎回新インスタンス"
             `Quick
             test_default_returns_fresh_instance
         ] )
     ; ( "color / set_color"
       , [ Alcotest.test_case "set → get round trip" `Quick test_set_color_basic
         ; Alcotest.test_case "値は [0,255] にクリップ" `Quick test_set_color_clip
-        ; Alcotest.test_case "範囲外 idx で Invalid_argument" `Quick test_color_out_of_range
+        ; Alcotest.test_case
+            "範囲外 idx で Invalid_argument"
+            `Quick
+            test_color_out_of_range
         ] )
     ; ( ".pal 形式"
       , [ Alcotest.test_case "to → of round trip" `Quick test_pal_roundtrip
         ; Alcotest.test_case "長さ 192 以外は Error" `Quick test_pal_wrong_size
-        ; Alcotest.test_case "of_pal_bytes は入力から独立" `Quick test_of_pal_isolates_input
-        ; Alcotest.test_case "to_pal_bytes は master から独立" `Quick test_to_pal_isolates_output
+        ; Alcotest.test_case
+            "of_pal_bytes は入力から独立"
+            `Quick
+            test_of_pal_isolates_input
+        ; Alcotest.test_case
+            "to_pal_bytes は master から独立"
+            `Quick
+            test_to_pal_isolates_output
         ] )
     ; ( "pixels_to_rgba"
-      , [ Alcotest.test_case "2-bit pixel → master 経由で RGBA" `Quick test_pixels_to_rgba_basic
-        ; Alcotest.test_case "pixel >=4 は land 3" `Quick test_pixels_to_rgba_wraps
+      , [ Alcotest.test_case
+            "2-bit pixel → master 経由で RGBA"
+            `Quick
+            test_pixels_to_rgba_basic
+        ; Alcotest.test_case
+            "pixel >=4 は land 3"
+            `Quick
+            test_pixels_to_rgba_wraps
         ] )
-    ; "default_sub", [ Alcotest.test_case "[0x0F;0x00;0x10;0x30]" `Quick test_default_sub ]
+    ; ( "default_sub"
+      , [ Alcotest.test_case "[0x0F;0x00;0x10;0x30]" `Quick test_default_sub ]
+      )
     ]
-;;

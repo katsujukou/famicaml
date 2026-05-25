@@ -320,4 +320,83 @@ let () =
             `Quick
             test_write_only_read_returns_open_bus
         ] )
+    ; ( "step (scanline 進行)"
+      , [ Alcotest.test_case "1 step で dot+1" `Quick (fun () ->
+            let ppu = Ppu.mk () in
+            Ppu.step ppu;
+            Alcotest.(check int) "dot=1" 1 ppu.dot;
+            Alcotest.(check int) "scanline=0" 0 ppu.scanline)
+        ; Alcotest.test_case "dot 340→0, scanline +1" `Quick (fun () ->
+            let ppu = Ppu.mk () in
+            for _ = 1 to 341 do
+              Ppu.step ppu
+            done;
+            Alcotest.(check int) "dot=0" 0 ppu.dot;
+            Alcotest.(check int) "scanline=1" 1 ppu.scanline)
+        ; Alcotest.test_case "scanline 261 → 0, frame +1" `Quick (fun () ->
+            let ppu = Ppu.mk () in
+            (* 1 frame = 262 × 341 = 89342 dot *)
+            for _ = 1 to 89342 do
+              Ppu.step ppu
+            done;
+            Alcotest.(check int) "dot=0" 0 ppu.dot;
+            Alcotest.(check int) "scanline=0" 0 ppu.scanline;
+            Alcotest.(check int) "frame=1" 1 ppu.frame)
+        ; Alcotest.test_case
+            "vblank フラグ・nmi_request@(241,1) NMI enabled"
+            `Quick
+            (fun () ->
+               let ppu = Ppu.mk () in
+               ppu.ctrl <- { ppu.ctrl with enable_nmi = true };
+               (* scanline 241 dot 1 まで進める: 241 * 341 + 1 = 82182 dot *)
+               for _ = 1 to 82182 do
+                 Ppu.step ppu
+               done;
+               Alcotest.(check int) "scanline=241" 241 ppu.scanline;
+               Alcotest.(check int) "dot=1" 1 ppu.dot;
+               Alcotest.(check bool) "vblank set" true ppu.status.vblank_flag;
+               Alcotest.(check bool) "nmi_request set" true ppu.nmi_request;
+               Alcotest.(check bool)
+                 "frame_complete set"
+                 true
+                 ppu.frame_complete)
+        ; Alcotest.test_case
+            "NMI disabled なら nmi_request は立たない"
+            `Quick
+            (fun () ->
+               let ppu = Ppu.mk () in
+               for _ = 1 to 82182 do
+                 Ppu.step ppu
+               done;
+               Alcotest.(check bool) "vblank set" true ppu.status.vblank_flag;
+               Alcotest.(check bool) "nmi_request false" false ppu.nmi_request)
+        ; Alcotest.test_case
+            "pre-render @ (261,1) で vblank/sprite0/overflow クリア"
+            `Quick
+            (fun () ->
+               let ppu = Ppu.mk () in
+               ppu.status
+               <- { vblank_flag = true
+                  ; sprite_0_hit = true
+                  ; sprite_overflow = true
+                  };
+               (* scanline 261 dot 1 まで: 261 * 341 + 1 = 89002 dot *)
+               for _ = 1 to 89002 do
+                 Ppu.step ppu
+               done;
+               Alcotest.(check int) "scanline=261" 261 ppu.scanline;
+               Alcotest.(check int) "dot=1" 1 ppu.dot;
+               Alcotest.(check bool)
+                 "vblank cleared"
+                 false
+                 ppu.status.vblank_flag;
+               Alcotest.(check bool)
+                 "sprite0 cleared"
+                 false
+                 ppu.status.sprite_0_hit;
+               Alcotest.(check bool)
+                 "overflow cleared"
+                 false
+                 ppu.status.sprite_overflow)
+        ] )
     ]

@@ -3,12 +3,13 @@ open Famicaml_common.Nesint
 (** カートリッジマッパーの読み書きを表す抽象型。 内部実装。バスからのアクセスを取り替えるための間接層。 *)
 type mapper_io
 
-(** NES 本体の状態。CPU・バス・WRAM・現在挿入中のカートリッジを保持する。 *)
+(** NES 本体の状態。CPU・PPU・バス・WRAM・現在挿入中のカートリッジを保持する。 *)
 type t =
   { mutable power : bool
   ; mutable cart : Rom.Cartridge.t option
   ; mutable mapper : mapper_io
-  ; cpu : Cpu.t
+  ; cpu : Cpu.t (** Per-cycle 6502 CPU. *)
+  ; ppu : Ppu.t
   ; memory_bus : Bus.t
   ; wram : Bytes.t
     (** 2KB の CPU 内蔵 RAM。eject / reset / power_off / connect すべてで保持される。 *)
@@ -39,3 +40,11 @@ val power_on : t -> unit
 
 (** 電源を切る。本モデルでは WRAM はモジュールが解放されるまで残る (現実の SRAM は短時間ならデータを保持するという挙動の近似)。 *)
 val power_off : t -> unit
+
+(** 1 CPU cycle 進める (= PPU 3 dot 進む)。PPU が vblank で nmi_request を
+    立てた場合は CPU に転写する. *)
+val tick : t -> unit
+
+(** 次の vblank 開始 (= 1 フレーム完了) まで {!tick} し続ける。
+    NTSC では約 29780 CPU cycle ≈ 89342 PPU dot を消費する. *)
+val run_until_frame : t -> unit
