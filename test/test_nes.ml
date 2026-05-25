@@ -138,15 +138,20 @@ let test_wram_roundtrip () =
   Alcotest.(check int) "wram readback" 0x77 (bus_read_u8 nes 0x0123);
   Alcotest.(check int) "wram mirror $0923" 0x77 (bus_read_u8 nes 0x0923)
 
-let test_unmapped_raises () =
+let test_unmapped_returns_zero () =
   let _, cart = make_nrom_cart ~prg_kb:16 () in
   let nes = nes_with cart in
-  (* $2000-$3FFF は PPU に dispatch されるので raise しない (PPU テスト参照).
-     $4000-$401F (APU/IO) や $4020-$7FFF (expansion) は未実装で raise. *)
-  Alcotest.check_raises "$4020 read" Exn.Out_of_range (fun () ->
-    ignore (bus_read_u8 nes 0x4020));
-  Alcotest.check_raises "$5000 write" Exn.Out_of_range (fun () ->
-    bus_write_u8 nes 0x5000 0)
+  (* $4000-$401F (APU/IO) や $4020-$7FFF (expansion / SRAM) は
+     現段階では未実装で no-op スタブ: read = 0, write = 捨て.
+     例外を投げると ROM の reset routine ($4017 等への書き込み) で死ぬので
+     とりあえず通す方針. *)
+  Alcotest.(check int) "$4017 read = 0" 0 (bus_read_u8 nes 0x4017);
+  Alcotest.(check int) "$4020 read = 0" 0 (bus_read_u8 nes 0x4020);
+  Alcotest.(check int) "$6000 read = 0" 0 (bus_read_u8 nes 0x6000);
+  (* write は raise しない *)
+  bus_write_u8 nes 0x4017 0xFF;
+  bus_write_u8 nes 0x5000 0xAA;
+  bus_write_u8 nes 0x6000 0xBB
 
 (* ------------------------------------------------------------------ *)
 (* eject / connect サイクル — テニス+SMB の 256W グリッチ的シナリオ      *)
@@ -348,7 +353,10 @@ let () =
         ] )
     ; ( "WRAM / 未マップ領域"
       , [ Alcotest.test_case "WRAM round trip" `Quick test_wram_roundtrip
-        ; Alcotest.test_case "$2000/$5000 raises" `Quick test_unmapped_raises
+        ; Alcotest.test_case
+            "APU/IO/SRAM 領域は no-op スタブ"
+            `Quick
+            test_unmapped_returns_zero
         ] )
     ; ( "eject / cart 差し替え"
       , [ Alcotest.test_case "eject は WRAM を保持" `Quick test_eject_preserves_wram
@@ -360,6 +368,140 @@ let () =
     ; ( "Ines.parse 経由の connect"
       , [ Alcotest.test_case "正常 iNES" `Quick test_connect_from_bytes
         ; Alcotest.test_case "invalid magic" `Quick test_connect_invalid_magic
+        ] )
+    ; ( "PPU メモリ統合 (Phase B2)"
+      , [ Alcotest.test_case "connect で PPU mirroring 注入" `Quick (fun () ->
+            let _, cart_h = make_nrom_cart ~prg_kb:16 () in
+            let nes = nes_with cart_h in
+            Alcotest.(check bool) "H mirroring" true (nes.ppu.mirroring = Cart.H);
+            let _, cart_v =
+              make_nrom_cart
+                ~spec:
+                  { mirroring = V; has_battery = false; has_trainer = false }
+                ~prg_kb:16
+                ()
+            in
+            let nes2 = nes_with cart_v in
+            Alcotest.(check bool)
+              "V mirroring"
+              true
+              (nes2.ppu.mirroring = Cart.V))
+        ; Alcotest.test_case "$2007 経由で CHR を read できる" `Quick (fun () ->
+            let _, cart = make_nrom_cart ~prg_kb:16 () in
+            (* CHR の特定 offset に sentinel を仕込む *)
+            (match cart.rom with
+             | NROM { chr; _ } -> Bytes.set_uint8 chr 0x0100 0xBE
+             | _ -> ());
+            let nes = nes_with cart in
+            (* $2006 で v = $0100 をセット *)
+            bus_write_u8 nes 0x2006 0x01;
+            bus_write_u8 nes 0x2006 0x00;
+            (* buffer 経由なので 1 回 read で捨て、もう一度セットして読む *)
+            let _ = bus_read_u8 nes 0x2007 in
+            bus_write_u8 nes 0x2006 0x01;
+            bus_write_u8 nes 0x2006 0x00;
+            let _ = bus_read_u8 nes 0x2007 in
+            let v = bus_read_u8 nes 0x2007 in
+            Alcotest.(check int) "CHR[$0100] = $BE" 0xBE v)
+        ; Alcotest.test_case "eject で PPU CHR は empty に戻る" `Quick (fun () ->
+            let _, cart = make_nrom_cart ~prg_kb:16 () in
+            (match cart.rom with
+             | NROM { chr; _ } -> Bytes.set_uint8 chr 0x0050 0xAB
+             | _ -> ());
+            let nes = nes_with cart in
+            Nes.eject nes;
+            Alcotest.(check bool)
+              "mirroring reset to H"
+              true
+              (nes.ppu.mirroring = Cart.H);
+            bus_write_u8 nes 0x2006 0x00;
+            bus_write_u8 nes 0x2006 0x50;
+            let _ = bus_read_u8 nes 0x2007 in
+            bus_write_u8 nes 0x2006 0x00;
+            bus_write_u8 nes 0x2006 0x50;
+            let _ = bus_read_u8 nes 0x2007 in
+            let v = bus_read_u8 nes 0x2007 in
+            Alcotest.(check int) "CHR は empty (0)" 0 v)
+        ] )
+    ; ( "Controller (Phase C)"
+      , [ Alcotest.test_case
+            "$4016 write は P1/P2 両方 strobe、$4016 read = P1"
+            `Quick
+            (fun () ->
+               let _, cart = make_nrom_cart ~prg_kb:16 () in
+               let nes = nes_with cart in
+               Emulator.Controller.set_button nes.controller1 A true;
+               Emulator.Controller.set_button nes.controller2 B true;
+               (* strobe: 1 → 0 で latch *)
+               bus_write_u8 nes 0x4016 1;
+               bus_write_u8 nes 0x4016 0;
+               (* P1: A=1, あと 7 bit *)
+               Alcotest.(check int) "P1 A" 1 (bus_read_u8 nes 0x4016);
+               Alcotest.(check int) "P1 B" 0 (bus_read_u8 nes 0x4016);
+               (* P2: A=0, B=1, あと... *)
+               Alcotest.(check int) "P2 A" 0 (bus_read_u8 nes 0x4017);
+               Alcotest.(check int) "P2 B" 1 (bus_read_u8 nes 0x4017))
+        ; Alcotest.test_case
+            "$4017 write は controller の strobe に影響しない (APU 用)"
+            `Quick
+            (fun () ->
+               let _, cart = make_nrom_cart ~prg_kb:16 () in
+               let nes = nes_with cart in
+               Emulator.Controller.set_button nes.controller1 Start true;
+               (* 通常の strobe 経由で latch *)
+               bus_write_u8 nes 0x4016 1;
+               bus_write_u8 nes 0x4016 0;
+               let _ = bus_read_u8 nes 0x4016 in
+               (* A *)
+               let _ = bus_read_u8 nes 0x4016 in
+               (* B *)
+               let _ = bus_read_u8 nes 0x4016 in
+               (* Select *)
+               (* ここで $4017 に 1 を書いてみる. もし誤って strobe に影響すれば
+              shift register が崩れて Start = 1 が読めないはず. *)
+               bus_write_u8 nes 0x4017 1;
+               Alcotest.(check int)
+                 "Start still readable"
+                 1
+                 (bus_read_u8 nes 0x4016))
+        ] )
+    ; ( "OAMDMA (Phase B3)"
+      , [ Alcotest.test_case
+            "$4014 で WRAM 256 byte が OAM にコピーされる"
+            `Quick
+            (fun () ->
+               let _, cart = make_nrom_cart ~prg_kb:16 () in
+               let nes = nes_with cart in
+               (* WRAM $0200-$02FF にパターンを書く *)
+               for i = 0 to 255 do
+                 bus_write_u8 nes (0x0200 + i) (i * 7 land 0xFF)
+               done;
+               (* $4014 write で DMA pending を立てる *)
+               bus_write_u8 nes 0x4014 0x02;
+               Alcotest.(check bool)
+                 "dma_source pending"
+                 true
+                 (nes.dma_source = Some 0x02);
+               (* Nes.tick が DMA を消化する *)
+               let prev_cycles = nes.cpu.cycles in
+               Nes.tick nes;
+               Alcotest.(check bool)
+                 "dma_source cleared"
+                 true
+                 (nes.dma_source = None);
+               (* OAM の中身が WRAM のパターンと一致 *)
+               for i = 0 to 255 do
+                 Alcotest.(check int)
+                   (Printf.sprintf "OAM[%d]" i)
+                   (i * 7 land 0xFF)
+                   (Bytes.get_uint8 nes.ppu.oam i)
+               done;
+               (* CPU cycle は 513 or 514 進む *)
+               let diff = nes.cpu.cycles - prev_cycles in
+               Alcotest.(check bool)
+                 "CPU stall 513 or 514"
+                 true
+                 (diff = 513 || diff = 514))
         ] )
     ; ( "CPU↔PPU lockstep"
       , [ Alcotest.test_case

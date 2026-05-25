@@ -5,6 +5,7 @@ module Cart = Emulator.Rom.Cartridge
 module Nes = Emulator.Nes
 module Pattern_table = Emulator.Ppu.Pattern_table
 module Palette = Emulator.Ppu.Palette
+module Controller = Emulator.Controller
 
 (* ------------------------------------------------------------------ *)
 (* ヘルパー                                                             *)
@@ -27,7 +28,7 @@ let uint8array_of_bytes (b : bytes) : Typed_array.uint8Array Js.t =
   let len = Bytes.length b in
   let arr = new%js Typed_array.uint8Array len in
   for i = 0 to len - 1 do
-    Typed_array.set arr i (Bytes.get_uint8 b i)
+    Typed_array.set arr i (Char.code (Bytes.unsafe_get b i))
   done;
   arr
 
@@ -48,15 +49,13 @@ let rom_summary = function
 let nes : Nes.t = Nes.mk ()
 
 (* ------------------------------------------------------------------ *)
-(* グローバル Palette 状態                                              *)
+(* Pattern viewer 用 sub palette (4 色)。                              *)
 (*                                                                     *)
-(* マスターパレット (64 色) と pattern viewer 用 sub palette (4 色)。   *)
-(* どちらもブラウザ側 UI から編集される。将来 PPU の palette RAM が     *)
-(* 実装されたら sub の動的選択ロジックはそちらへ移し、ここは display    *)
-(* レイヤ専用 (master だけ) になる想定。 *)
+(* マスターパレット (64 色) は Phase B1 以降 PPU 内部 (nes.ppu) に     *)
+(* 統合されたので、viewer/emulator で同じ master を共有する。          *)
+(* sub palette は viewer 専用 (デバッグ用) なので wasm 側で保持する。   *)
 (* ------------------------------------------------------------------ *)
 
-let master_palette : Palette.t ref = ref (Palette.default ())
 let viewer_sub : Palette.sub ref = ref (Palette.default_sub ())
 
 (* ------------------------------------------------------------------ *)
@@ -108,9 +107,14 @@ let pattern_table_js (idx : int) =
     then Js.null
     else (
       let pixels = Pattern_table.decode_table ~chr ~table_ofs in
-      let rgba =
-        Palette.pixels_to_rgba pixels ~master:!master_palette ~sub:!viewer_sub
+      let master =
+        match
+          Palette.of_pal_bytes (Emulator.Ppu.get_master_palette nes.ppu)
+        with
+        | Ok p -> p
+        | Error _ -> Palette.default ()
       in
+      let rgba = Palette.pixels_to_rgba pixels ~master ~sub:!viewer_sub in
       Js.some
         (object%js
            val width = 128
@@ -124,24 +128,20 @@ let pattern_table_js (idx : int) =
 
 (** マスターパレットを .pal 形式 (192 byte) で取得する。 *)
 let get_master_palette () =
-  uint8array_of_bytes (Palette.to_pal_bytes !master_palette)
+  uint8array_of_bytes (Emulator.Ppu.get_master_palette nes.ppu)
 
 (** .pal バイト列を読み込んでマスターパレットを差し替える。
     成功なら true、失敗 (サイズ不正等) なら false。 *)
 let set_master_palette (arr : Typed_array.uint8Array Js.t) =
   let b = bytes_of_uint8array arr in
-  match Palette.of_pal_bytes b with
-  | Ok m ->
-    master_palette := m;
-    Js._true
-  | Error _ -> Js._false
+  if Emulator.Ppu.set_master_palette nes.ppu b then Js._true else Js._false
 
 (** マスターパレットを内蔵デフォルトに戻す。 *)
-let reset_master_palette () = master_palette := Palette.default ()
+let reset_master_palette () = Emulator.Ppu.reset_master_palette nes.ppu
 
 (** マスターインデックス [idx] (0..63) の色を更新する。 *)
 let set_master_color (idx : int) (r : int) (g : int) (b : int) =
-  if idx >= 0 && idx < 64 then Palette.set_color !master_palette idx ~r ~g ~b
+  Emulator.Ppu.set_master_color nes.ppu idx ~r ~g ~b
 
 (** Pattern viewer 用 sub palette の 4 スロットを 4 byte で取得する。
     各 byte がマスターインデックス 0..63。 *)
@@ -155,6 +155,63 @@ let get_viewer_sub () =
 let set_viewer_sub_slot (slot : int) (master_idx : int) =
   if slot >= 0 && slot < 4 && master_idx >= 0 && master_idx < 64
   then !viewer_sub.(slot) <- master_idx
+
+(** 256×240 RGBA の frame buffer を Uint8Array として取得する.
+    毎フレーム呼ばれる前提でコピーは避けたいが、Js_of_ocaml 6.2 では
+    Bytes と Uint8Array のゼロコピー連携が無いので毎回コピーする. *)
+let get_framebuffer () = uint8array_of_bytes nes.ppu.framebuffer
+
+(* ------------------------------------------------------------------ *)
+(* Controller                                                           *)
+(*                                                                     *)
+(* JS 側からは player (0 = P1, 1 = P2) と button (0..7) を渡す.        *)
+(* button index: 0=A, 1=B, 2=Select, 3=Start, 4=Up, 5=Down, 6=Left,    *)
+(*                7=Right (Controller.button の variant 順と一致).      *)
+(* ------------------------------------------------------------------ *)
+
+let controller_of_player (p : int) : Controller.t option =
+  match p with
+  | 0 -> Some nes.controller1
+  | 1 -> Some nes.controller2
+  | _ -> None
+
+let button_of_int (i : int) : Controller.button option =
+  match i with
+  | 0 -> Some A
+  | 1 -> Some B
+  | 2 -> Some Select
+  | 3 -> Some Start
+  | 4 -> Some Up
+  | 5 -> Some Down
+  | 6 -> Some Left
+  | 7 -> Some Right
+  | _ -> None
+
+let set_button (player : int) (button : int) (pressed : bool Js.t) : unit =
+  match (controller_of_player player, button_of_int button) with
+  | Some c, Some b -> Controller.set_button c b (Js.to_bool pressed)
+  | _ -> ()
+
+let release_all_buttons () =
+  Controller.release_all nes.controller1;
+  Controller.release_all nes.controller2
+
+(** OCaml の例外を JS 側に投げる前に Printexc.to_string で名前を
+    取り出して console.error に出す。これがないと JS では
+    "WebAssembly.Exception {stack: undefined}" としか見えない. *)
+let with_error_logging (label : string) (f : unit -> 'a) : 'a =
+  try f () with
+  | e ->
+    let msg = Printexc.to_string e in
+    Console.console##error (Js.string ("[" ^ label ^ "] " ^ msg));
+    raise e
+
+let run_frame_safe () =
+  with_error_logging "runFrame" (fun () -> Nes.run_until_frame nes)
+
+let tick_safe () = with_error_logging "tick" (fun () -> Nes.tick nes)
+let reset_safe () = with_error_logging "reset" (fun () -> Nes.reset nes)
+let power_on_safe () = with_error_logging "powerOn" (fun () -> Nes.power_on nes)
 
 let load_rom (arr : Typed_array.uint8Array Js.t) =
   let data = bytes_of_uint8array arr in
@@ -172,19 +229,28 @@ let load_rom (arr : Typed_array.uint8Array Js.t) =
       val error = Js.some (Js.string (Ines.error_to_string e))
     end
 
+let () = Printexc.record_backtrace true
+
 let () =
   Js.export
     "FamiCaml"
     (object%js
        val loadRom = Js.wrap_callback load_rom
        val eject = Js.wrap_callback (fun () -> Nes.eject nes)
-       val reset = Js.wrap_callback (fun () -> Nes.reset nes)
-       val powerOn = Js.wrap_callback (fun () -> Nes.power_on nes)
+       val reset = Js.wrap_callback reset_safe
+       val powerOn = Js.wrap_callback power_on_safe
        val powerOff = Js.wrap_callback (fun () -> Nes.power_off nes)
        val state = Js.wrap_callback state_js
        val patternTable = Js.wrap_callback pattern_table_js
-       val runFrame = Js.wrap_callback (fun () -> Nes.run_until_frame nes)
-       val tick = Js.wrap_callback (fun () -> Nes.tick nes)
+       val runFrame = Js.wrap_callback run_frame_safe
+       val tick = Js.wrap_callback tick_safe
+       val getFramebuffer = Js.wrap_callback get_framebuffer
+
+       val setButton =
+         Js.wrap_callback (fun player button pressed ->
+           set_button player button pressed)
+
+       val releaseAllButtons = Js.wrap_callback release_all_buttons
        val getMasterPalette = Js.wrap_callback get_master_palette
        val setMasterPalette = Js.wrap_callback set_master_palette
        val resetMasterPalette = Js.wrap_callback reset_master_palette

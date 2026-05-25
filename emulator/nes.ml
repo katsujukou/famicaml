@@ -1,13 +1,22 @@
 open Famicaml_common.Nesint
 
-(** マッパーの read/write 関数ペア。CPU バスアドレス (0x8000-0xFFFF) を 受け取り、対応するバイトを読み書きする。 *)
+(** マッパーの CPU 側 / PPU 側 read/write 関数群。
+    - [read]/[write]: CPU バス $8000-$FFFF (PRG-ROM および bank select レジスタ)
+    - [chr_read]/[chr_write]: PPU バス $0000-$1FFF (pattern table; CHR-ROM/RAM) *)
 type mapper_io =
   { read : int -> int
   ; write : int -> int -> unit
+  ; chr_read : int -> uint8
+  ; chr_write : int -> uint8 -> unit
   }
 
 (** カートリッジが挿さっていない時の状態。Open bus は実機では浮動値だが、 本実装では 0 で代用する。 *)
-let empty_mapper : mapper_io = { read = (fun _ -> 0); write = (fun _ _ -> ()) }
+let empty_mapper : mapper_io =
+  { read = (fun _ -> 0)
+  ; write = (fun _ _ -> ())
+  ; chr_read = (fun _ -> Uint8.zero)
+  ; chr_write = (fun _ _ -> ())
+  }
 
 type t =
   { mutable power : bool
@@ -15,11 +24,15 @@ type t =
   ; mutable mapper : mapper_io
   ; cpu : Cpu.t
   ; ppu : Ppu.t
+  ; controller1 : Controller.t
+  ; controller2 : Controller.t
   ; memory_bus : Bus.t
   ; wram : Bytes.t
   ; mutable ith_nmi : uint16
   ; mutable ith_reset : uint16
   ; mutable ith_irq : uint16
+  ; mutable dma_source : int option
+    (** Some high の間 OAMDMA 待ち。次の {!tick} で消化される。 *)
   }
 
 (* ------------------------------------------------------------------ *)
@@ -39,18 +52,51 @@ let prg_read_unrom prg ~bank_lo cpu_addr =
   let ofs = (bank * 0x4000) + (cpu_addr land 0x3FFF) in
   Bytes.get_uint8 prg ofs
 
-(** Cartridge の中身に応じた mapper_io を構築する。 PPU 実装まで CNROM の CHR バンク切替は無視。 *)
+(* CHR 8KB を ofs (任意のbit幅) で読む。実体長で wrap させる. *)
+let chr_read_fixed chr ofs =
+  let len = Bytes.length chr in
+  if len = 0
+  then Uint8.zero
+  else Uint8.of_int (Bytes.get_uint8 chr (ofs mod len))
+
+let chr_write_fixed chr ofs v =
+  let len = Bytes.length chr in
+  if len > 0 then Bytes.set_uint8 chr (ofs mod len) (Uint8.to_int v)
+
+let chr_write_noop _ _ = ()
+
+(** Cartridge の中身に応じた mapper_io を構築する。
+
+    - NROM: PRG は 16/32KB 固定、CHR は 8KB ROM (固定).
+    - CNROM: PRG 固定、CHR は 8KB×N bank を $8000 write で選択.
+    - UNROM: PRG の下位 bank を $8000 write で選択、CHR は 8KB RAM. *)
 let make_mapper (cart : Rom.Cartridge.t) : mapper_io =
   match cart.rom with
-  | Rom.Cartridge.NROM { prg; _ } ->
-    { read = prg_read_fixed prg; write = (fun _ _ -> ()) }
-  | Rom.Cartridge.CNROM { prg; _ } ->
-    { read = prg_read_fixed prg; write = (fun _ _ -> ()) }
-  | Rom.Cartridge.UNROM { prg; _ } ->
+  | Rom.Cartridge.NROM { prg; chr } ->
+    { read = prg_read_fixed prg
+    ; write = (fun _ _ -> ())
+    ; chr_read = chr_read_fixed chr
+    ; chr_write = chr_write_noop
+    }
+  | Rom.Cartridge.CNROM { prg; chr } ->
+    let bank_size = 0x2000 in
+    let n_banks = max 1 (Bytes.length chr / bank_size) in
+    let chr_bank = ref 0 in
+    { read = prg_read_fixed prg
+    ; write = (fun _ x -> chr_bank := x mod n_banks)
+    ; chr_read =
+        (fun ofs ->
+          let off = (!chr_bank * bank_size) + (ofs land 0x1FFF) in
+          chr_read_fixed chr off)
+    ; chr_write = chr_write_noop
+    }
+  | Rom.Cartridge.UNROM { prg; chr_ram } ->
     let bank_lo = ref 0 in
     let n_banks = Bytes.length prg / 0x4000 in
     { read = (fun a -> prg_read_unrom prg ~bank_lo:!bank_lo a)
     ; write = (fun _ x -> bank_lo := x mod n_banks)
+    ; chr_read = chr_read_fixed chr_ram
+    ; chr_write = chr_write_fixed chr_ram
     }
 
 (* ------------------------------------------------------------------ *)
@@ -91,9 +137,19 @@ let mk () =
     then
       (* PPU registers (8 byte mirror; addr land 0x07 で dispatch) *)
       Ppu.cpu_read (current_nes ()).ppu p
-    else if u >= 0x8000
-    then Uint8.of_int ((current_nes ()).mapper.read u)
-    else raise Exn.Out_of_range
+    else if u = 0x4016
+    then Uint8.of_int (Controller.read (current_nes ()).controller1)
+    else if u = 0x4017
+    then Uint8.of_int (Controller.read (current_nes ()).controller2)
+    else if u < 0x4020
+    then
+      (* APU 他 — 未実装スタブ (read は open bus = 0) *)
+      Uint8.zero
+    else if u < 0x8000
+    then
+      (* cart expansion / SRAM 領域 — 未実装スタブ *)
+      Uint8.zero
+    else Uint8.of_int ((current_nes ()).mapper.read u)
   in
   let bus_write_access p x =
     let u = Uint16.to_int p in
@@ -101,24 +157,43 @@ let mk () =
     then Bytes.set_uint8 wram (u land 0x07FF) (Uint8.to_int x)
     else if u < 0x4000
     then Ppu.cpu_write (current_nes ()).ppu p x
-    else if u >= 0x8000
-    then (current_nes ()).mapper.write u (Uint8.to_int x)
-    else raise Exn.Out_of_range
+    else if u = 0x4014
+    then
+      (* OAMDMA: 次の tick で 256 byte コピー + CPU stall *)
+      (current_nes ()).dma_source <- Some (Uint8.to_int x)
+    else if u = 0x4016
+    then (
+      (* $4016 write は P1/P2 共通の strobe ライン. 両方 wire. *)
+      let n = current_nes () in
+      Controller.write_strobe n.controller1 (Uint8.to_int x);
+      Controller.write_strobe n.controller2 (Uint8.to_int x))
+    else if u < 0x4020
+    then
+      (* $4017 write は APU frame counter. controller の strobe には影響しない. *)
+      ()
+    else if u < 0x8000
+    then ()
+    else (current_nes ()).mapper.write u (Uint8.to_int x)
   in
   let bus = Bus.mk ~read:bus_read_access ~write:bus_write_access in
   let cpu = Cpu.mk () in
   let ppu = Ppu.mk () in
+  let controller1 = Controller.mk () in
+  let controller2 = Controller.mk () in
   let nes =
     { power = false
     ; cart = None
     ; mapper = empty_mapper
     ; cpu
     ; ppu
+    ; controller1
+    ; controller2
     ; memory_bus = bus
     ; wram
     ; ith_nmi = Uint16.zero
     ; ith_reset = Uint16.zero
     ; ith_irq = Uint16.zero
+    ; dma_source = None
     }
   in
   nes_ref := Some nes;
@@ -141,7 +216,12 @@ let refresh_vectors (nes : t) =
 
 let connect_cartridge (nes : t) (cart : Rom.Cartridge.t) =
   nes.cart <- Some cart;
-  nes.mapper <- make_mapper cart;
+  let mapper = make_mapper cart in
+  nes.mapper <- mapper;
+  Ppu.connect_cart
+    nes.ppu
+    ~mirroring:cart.spec.mirroring
+    ~chr_io:{ Ppu.chr_read = mapper.chr_read; Ppu.chr_write = mapper.chr_write };
   refresh_vectors nes
 
 let connect (nes : t) (data : bytes) =
@@ -154,6 +234,7 @@ let connect (nes : t) (data : bytes) =
 let eject (nes : t) =
   nes.cart <- None;
   nes.mapper <- empty_mapper;
+  Ppu.disconnect_cart nes.ppu;
   nes.ith_nmi <- Uint16.zero;
   nes.ith_reset <- Uint16.zero;
   nes.ith_irq <- Uint16.zero
@@ -182,16 +263,39 @@ let power_off (nes : t) = nes.power <- false
 (* CPU に転写する。run_until_frame は次の vblank 開始まで tick し続ける. *)
 (* ------------------------------------------------------------------ *)
 
-(** 1 CPU cycle 進める。PPU も 3 dot 進む。NMI 発火を CPU に転写する。 *)
+(** 1 CPU cycle 進める。PPU も 3 dot 進む。NMI 発火を CPU に転写する。
+
+    OAMDMA 待ち (dma_source = Some _) があればこの tick でまとめて消化する:
+    - $XX00-$XXFF の 256 byte を順に bus.read → $2004 write で OAM へコピー
+    - CPU を 513 (奇数 cycle 開始なら 514) cycle stall させる
+    - PPU は stall 中も走る (513 cycle × 3 dot 進める) *)
 let tick (nes : t) : unit =
-  Cpu.tick nes.memory_bus nes.cpu;
-  Ppu.step nes.ppu;
-  Ppu.step nes.ppu;
-  Ppu.step nes.ppu;
-  if nes.ppu.nmi_request
-  then (
-    nes.ppu.nmi_request <- false;
-    Cpu.request_nmi nes.cpu)
+  match nes.dma_source with
+  | Some high ->
+    nes.dma_source <- None;
+    let src_base = high lsl 8 in
+    for i = 0 to 255 do
+      let b = nes.memory_bus.read (Uint16.of_int (src_base + i)) in
+      Ppu.cpu_write nes.ppu (Uint16.of_int 0x2004) b
+    done;
+    let stall = if nes.cpu.cycles land 1 = 1 then 514 else 513 in
+    nes.cpu.cycles <- nes.cpu.cycles + stall;
+    for _ = 1 to stall * 3 do
+      Ppu.step nes.ppu
+    done;
+    if nes.ppu.nmi_request
+    then (
+      nes.ppu.nmi_request <- false;
+      Cpu.request_nmi nes.cpu)
+  | None ->
+    Cpu.tick nes.memory_bus nes.cpu;
+    Ppu.step nes.ppu;
+    Ppu.step nes.ppu;
+    Ppu.step nes.ppu;
+    if nes.ppu.nmi_request
+    then (
+      nes.ppu.nmi_request <- false;
+      Cpu.request_nmi nes.cpu)
 
 (** 次の vblank 開始 (= 1 フレーム完了) まで tick し続ける。 *)
 let run_until_frame (nes : t) : unit =

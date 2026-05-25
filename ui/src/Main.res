@@ -23,6 +23,25 @@ type fileList
 @get external fileListLength: fileList => int = "length"
 @get_index external fileListItem: (fileList, int) => file = ""
 
+/* ---- Keyboard event ---- */
+
+type keyboardEvent
+@get external keyEventCode: keyboardEvent => string = "code"
+@get external keyEventRepeat: keyboardEvent => bool = "repeat"
+@send external keyEventPreventDefault: keyboardEvent => unit = "preventDefault"
+
+@val @scope("window")
+external windowAddKeyListener: (string, keyboardEvent => unit) => unit = "addEventListener"
+
+@val @scope("window")
+external windowRemoveKeyListener: (string, keyboardEvent => unit) => unit = "removeEventListener"
+
+@val @scope("window")
+external windowAddBlurListener: (string, unit => unit) => unit = "addEventListener"
+
+@val @scope("window")
+external windowRemoveBlurListener: (string, unit => unit) => unit = "removeEventListener"
+
 @get external targetFiles: {..} => Nullable.t<fileList> = "files"
 
 /* ---- Canvas / ImageData バインディング ---- */
@@ -110,6 +129,9 @@ type famiCamlApi = {
   setViewerSubSlot: (int, int) => unit,
   runFrame: unit => unit,
   tick: unit => unit,
+  getFramebuffer: unit => uint8Array,
+  setButton: (int, int, bool) => unit,
+  releaseAllButtons: unit => unit,
 }
 
 @val @scope("globalThis") external famiCaml: Nullable.t<famiCamlApi> = "FamiCaml"
@@ -158,6 +180,22 @@ let parseHexColor = s =>
 let readMaster = (master: uint8Array, idx) => {
   let off = idx * 3
   (uint8At(master, off), uint8At(master, off + 1), uint8At(master, off + 2))
+}
+
+/* canvas に NES の frame buffer (256×240 RGBA) を描画. */
+let renderNesFrame = (ref_: React.ref<Nullable.t<Dom.element>>) => {
+  switch (Nullable.toOption(famiCaml), ref_.current->Nullable.toOption) {
+  | (Some(api), Some(elt)) =>
+    let canvas = asCanvas(elt)
+    let ctx = getContext2d(canvas)
+    let rgba = api.getFramebuffer()
+    if uint8ArrayLength(rgba) == 256 * 240 * 4 {
+      let clamped = newUint8ClampedArrayFromArr(rgba)
+      let imgData = newImageData(clamped, 256, 240)
+      putImageData(ctx, imgData, 0, 0)
+    }
+  | _ => ()
+  }
 }
 
 /* canvas に pattern table を描画 (cart 未挿入時はグレーアウト). */
@@ -240,6 +278,41 @@ module Swatch = {
   }
 }
 
+/* ---- Keymap ---- */
+
+/* Controller binding: player (0=P1, 1=P2) と button index (0..7).
+   button index は wasm/main.ml の button_of_int に対応:
+   0=A, 1=B, 2=Select, 3=Start, 4=Up, 5=Down, 6=Left, 7=Right.
+   将来 UI から再設定するために Map で保持する設計. */
+
+type binding = {
+  player: int,
+  button: int,
+}
+
+let defaultKeymap = (): Map.t<string, binding> => {
+  let m = Map.make()
+  /* P1: ユーザ好みで A=X, B=Z */
+  Map.set(m, "KeyX", {player: 0, button: 0})       /* A */
+  Map.set(m, "KeyZ", {player: 0, button: 1})       /* B */
+  Map.set(m, "ShiftRight", {player: 0, button: 2}) /* Select */
+  Map.set(m, "Enter", {player: 0, button: 3})      /* Start */
+  Map.set(m, "ArrowUp", {player: 0, button: 4})
+  Map.set(m, "ArrowDown", {player: 0, button: 5})
+  Map.set(m, "ArrowLeft", {player: 0, button: 6})
+  Map.set(m, "ArrowRight", {player: 0, button: 7})
+  /* P2: 左手側 (FGRT) + 右手側 (IJKL) */
+  Map.set(m, "KeyG", {player: 1, button: 0})       /* A */
+  Map.set(m, "KeyF", {player: 1, button: 1})       /* B */
+  Map.set(m, "KeyR", {player: 1, button: 2})       /* Select */
+  Map.set(m, "KeyT", {player: 1, button: 3})       /* Start */
+  Map.set(m, "KeyI", {player: 1, button: 4})       /* Up */
+  Map.set(m, "KeyK", {player: 1, button: 5})       /* Down */
+  Map.set(m, "KeyJ", {player: 1, button: 6})       /* Left */
+  Map.set(m, "KeyL", {player: 1, button: 7})       /* Right */
+  m
+}
+
 /* ---- コンポーネント ---- */
 
 module App = {
@@ -250,6 +323,7 @@ module App = {
     let (selectedName, setSelectedName) = React.useState(() => "")
     let canvasLeft = React.useRef(Nullable.null)
     let canvasRight = React.useRef(Nullable.null)
+    let canvasNes = React.useRef(Nullable.null)
 
     /* Palette 状態。wasm 側の真値をミラーする。
        UI からの編集はまず wasm を呼んでから state に reflect する. */
@@ -271,6 +345,7 @@ module App = {
     let rafIdRef = React.useRef(None)
     let lastFrameTimeRef = React.useRef(0.0)
     let frameCountRef = React.useRef(0)
+    let fpsEmaRef = React.useRef(0.0)
 
     /* wasm_of_ocaml は wasm モジュールを非同期に取得・初期化するため、
        React の初回 mount より遅く globalThis.FamiCaml が立つことがある。
@@ -323,12 +398,108 @@ module App = {
       | None => setLastError(_ => Some("WASM module not yet loaded"))
       }
 
+    /* requestAnimationFrame ベースの実行ループ.
+       1 RAF tick = 1 NES フレーム (= 約 29780 CPU cycle).
+       FPS は frame-to-frame delta の指数移動平均 (EMA) で計算し、
+       15 フレームに 1 回 setFps して再レンダーを抑制する. */
+    let rec rafLoop = _ts => {
+      if runningRef.current {
+        switch Nullable.toOption(famiCaml) {
+        | Some(api) =>
+          try {
+            api.runFrame()
+            renderNesFrame(canvasNes)
+            let now = performanceNow()
+            /* 初回 (lastFrameTimeRef = 0) はスキップ. それ以外は delta から
+               瞬間 FPS を出して EMA で平滑化. */
+            if lastFrameTimeRef.current > 0.0 {
+              let delta = now -. lastFrameTimeRef.current
+              if delta > 0.0 {
+                let inst = 1000.0 /. delta
+                fpsEmaRef.current = if fpsEmaRef.current == 0.0 {
+                  inst
+                } else {
+                  0.9 *. fpsEmaRef.current +. 0.1 *. inst
+                }
+              }
+            }
+            lastFrameTimeRef.current = now
+            frameCountRef.current = frameCountRef.current + 1
+            if mod(frameCountRef.current, 15) == 0 {
+              setFps(_ => fpsEmaRef.current)
+            }
+            setState(_ => Some(api.state()))
+          } catch {
+          | exn =>
+            Console.error2("emulator threw, stopping run loop:", exn)
+            runningRef.current = false
+            setRunning(_ => false)
+            setLastError(_ => Some("emulator threw — see console"))
+          }
+        | None => ()
+        }
+        if runningRef.current {
+          rafIdRef.current = Some(requestAnimationFrame(rafLoop))
+        }
+      }
+    }
+
+    let startRun = () => {
+      if !runningRef.current {
+        runningRef.current = true
+        setRunning(_ => true)
+        /* lastFrameTimeRef = 0.0 で初回 delta 計算を skip させる */
+        lastFrameTimeRef.current = 0.0
+        frameCountRef.current = 0
+        fpsEmaRef.current = 0.0
+        rafIdRef.current = Some(requestAnimationFrame(rafLoop))
+      }
+    }
+
+    let stopRun = () => {
+      runningRef.current = false
+      setRunning(_ => false)
+      switch rafIdRef.current {
+      | Some(id) =>
+        cancelAnimationFrame(id)
+        rafIdRef.current = None
+      | None => ()
+      }
+    }
+
+    /* 現在 Power ON か = state.power. None なら OFF 扱い. */
+    let powerOn = switch state {
+    | Some(s) => s.power
+    | None => false
+    }
+
+    let togglePower = _ =>
+      switch Nullable.toOption(famiCaml) {
+      | Some(api) =>
+        if powerOn {
+          stopRun()
+          api.powerOff()
+        } else {
+          api.powerOn()
+        }
+        setState(_ => Some(api.state()))
+        if !powerOn {
+          /* 直前 OFF → 今 ON にしたので run 開始 */
+          startRun()
+        }
+      | None => setLastError(_ => Some("WASM module not yet loaded"))
+      }
+
     let handleArrayBuffer = (api, buf) => {
       let arr = newUint8Array(buf)
       let r = api.loadRom(arr)
       if r.ok {
         setLastError(_ => None)
-        setState(_ => Nullable.toOption(r.state))
+        /* 読み込み成功 → 自動 Power ON + Run 開始. デバッグで止めたい時は
+           Stop ボタンで一時停止できる. */
+        api.powerOn()
+        setState(_ => Some(api.state()))
+        startRun()
       } else {
         setLastError(_ => Nullable.toOption(r.error))
       }
@@ -374,54 +545,14 @@ module App = {
       }
     }
 
-    let onEject = _ => withApi(api => api.eject())
+    let onEject = _ => {
+      stopRun()
+      withApi(api => {
+        api.powerOff()
+        api.eject()
+      })
+    }
     let onReset = _ => withApi(api => api.reset())
-    let onPowerOn = _ => withApi(api => api.powerOn())
-    let onPowerOff = _ => withApi(api => api.powerOff())
-
-    /* requestAnimationFrame ベースの実行ループ.
-       1 RAF tick = 1 NES フレーム (= 約 29780 CPU cycle).
-       FPS は直近 1 秒間のフレーム数を計測して表示. */
-    let rec rafLoop = _ts => {
-      if runningRef.current {
-        switch Nullable.toOption(famiCaml) {
-        | Some(api) =>
-          api.runFrame()
-          frameCountRef.current = frameCountRef.current + 1
-          let now = performanceNow()
-          let elapsed = now -. lastFrameTimeRef.current
-          if elapsed >= 1000.0 {
-            setFps(_ => Float.fromInt(frameCountRef.current) *. 1000.0 /. elapsed)
-            frameCountRef.current = 0
-            lastFrameTimeRef.current = now
-          }
-          setState(_ => Some(api.state()))
-        | None => ()
-        }
-        rafIdRef.current = Some(requestAnimationFrame(rafLoop))
-      }
-    }
-
-    let startRun = () => {
-      if !runningRef.current {
-        runningRef.current = true
-        setRunning(_ => true)
-        lastFrameTimeRef.current = performanceNow()
-        frameCountRef.current = 0
-        rafIdRef.current = Some(requestAnimationFrame(rafLoop))
-      }
-    }
-
-    let stopRun = () => {
-      runningRef.current = false
-      setRunning(_ => false)
-      switch rafIdRef.current {
-      | Some(id) =>
-        cancelAnimationFrame(id)
-        rafIdRef.current = None
-      | None => ()
-      }
-    }
 
     let onRun = _ => startRun ()
     let onStop = _ => stopRun ()
@@ -429,6 +560,7 @@ module App = {
       switch Nullable.toOption(famiCaml) {
       | Some(api) =>
         api.runFrame()
+        renderNesFrame(canvasNes)
         setState(_ => Some(api.state()))
       | None => ()
       }
@@ -436,6 +568,49 @@ module App = {
     /* unmount で必ず止める */
     React.useEffect0(() => {
       Some(() => stopRun ())
+    })
+
+    /* キーボード入力 → コントローラ.
+       keymap は ref で保持し、将来 UI から再設定できる構造にしておく. */
+    let keymapRef = React.useRef(defaultKeymap())
+    React.useEffect0(() => {
+      let onKeyDown = e =>
+        switch Map.get(keymapRef.current, keyEventCode(e)) {
+        | Some(b) =>
+          /* matched なら repeat でも必ず preventDefault.
+             (repeat キーで Arrow による scroll が走るのを防ぐ) */
+          keyEventPreventDefault(e)
+          if !keyEventRepeat(e) {
+            switch Nullable.toOption(famiCaml) {
+            | Some(api) => api.setButton(b.player, b.button, true)
+            | None => ()
+            }
+          }
+        | None => ()
+        }
+      let onKeyUp = e =>
+        switch Map.get(keymapRef.current, keyEventCode(e)) {
+        | Some(b) =>
+          keyEventPreventDefault(e)
+          switch Nullable.toOption(famiCaml) {
+          | Some(api) => api.setButton(b.player, b.button, false)
+          | None => ()
+          }
+        | None => ()
+        }
+      let onBlur = () =>
+        switch Nullable.toOption(famiCaml) {
+        | Some(api) => api.releaseAllButtons()
+        | None => ()
+        }
+      windowAddKeyListener("keydown", onKeyDown)
+      windowAddKeyListener("keyup", onKeyUp)
+      windowAddBlurListener("blur", onBlur)
+      Some(() => {
+        windowRemoveKeyListener("keydown", onKeyDown)
+        windowRemoveKeyListener("keyup", onKeyUp)
+        windowRemoveBlurListener("blur", onBlur)
+      })
     })
 
     let onExportPal = _ =>
@@ -608,11 +783,35 @@ module App = {
               {React.string("File: " ++ selectedName)}
             </p>}
       </section>
-      <section style={{marginTop: "1rem"}}>
-        <button onClick=onPowerOn style=buttonStyle> {React.string("Power ON")} </button>
-        <button onClick=onPowerOff style=buttonStyle> {React.string("Power OFF")} </button>
-        <button onClick=onReset style=buttonStyle> {React.string("Reset")} </button>
-        <button onClick=onEject style=buttonStyle> {React.string("Eject")} </button>
+      <section
+        style={{
+          marginTop: "1rem",
+          display: "flex",
+          alignItems: "center",
+          gap: "0.5rem",
+        }}>
+        <button onClick=togglePower style=buttonStyle>
+          {React.string(powerOn ? "⏻ Power OFF" : "⏻ Power ON")}
+        </button>
+        <span
+          title={powerOn ? "POWER ON" : "POWER OFF"}
+          style={{
+            display: "inline-block",
+            width: "12px",
+            height: "12px",
+            borderRadius: "50%",
+            backgroundColor: powerOn ? "#e33" : "#444",
+            boxShadow: powerOn ? "0 0 6px #f55" : "none",
+            border: "1px solid #222",
+          }}
+        />
+        <span style={{fontFamily: "monospace", fontSize: "0.85rem", color: "#666"}}>
+          {React.string(powerOn ? "POWER" : "—")}
+        </span>
+        <button onClick=onReset style=buttonStyle disabled={!powerOn}>
+          {React.string("Reset")}
+        </button>
+        <button onClick=onEject style=buttonStyle> {React.string("⏏ Eject")} </button>
       </section>
       <section
         style={{
@@ -622,17 +821,17 @@ module App = {
           gap: "0.5rem",
         }}>
         {running
-          ? <button onClick=onStop style=buttonStyle>
-              {React.string("⏸ Stop")}
+          ? <button onClick=onStop style=buttonStyle disabled={!powerOn}>
+              {React.string("⏸ Pause")}
             </button>
-          : <button onClick=onRun style=buttonStyle>
-              {React.string("▶ Run (60 fps)")}
+          : <button onClick=onRun style=buttonStyle disabled={!powerOn}>
+              {React.string("▶ Resume")}
             </button>}
-        <button onClick=onStep style=buttonStyle> {React.string("⏭ Step 1 frame")} </button>
+        <button onClick=onStep style=buttonStyle disabled={!powerOn}>
+          {React.string("⏭ Step 1 frame")}
+        </button>
         <span style={{color: "#666", fontFamily: "monospace", fontSize: "0.9rem"}}>
-          {React.string(
-            "FPS: " ++ Float.toFixed(fps, ~digits=1),
-          )}
+          {React.string("FPS: " ++ Float.toFixed(fps, ~digits=1))}
         </span>
       </section>
       {switch lastError {
@@ -642,6 +841,22 @@ module App = {
         </p>
       | None => React.null
       }}
+      <section style={{marginTop: "1rem"}}>
+        <h2 style={{marginBottom: "0.5rem"}}> {React.string("Screen")} </h2>
+        <canvas
+          ref={ReactDOM.Ref.domRef(canvasNes)}
+          width="256"
+          height="240"
+          style={{
+            width: "512px",
+            height: "480px",
+            imageRendering: "pixelated",
+            border: "1px solid #444",
+            backgroundColor: "#000",
+            display: "block",
+          }}
+        />
+      </section>
       <section style={{marginTop: "1rem"}}>
         <h2 style={{marginBottom: "0.5rem"}}> {React.string("Pattern Tables")} </h2>
         <div style={{display: "flex", gap: "1rem", flexWrap: "wrap"}}>

@@ -10,12 +10,17 @@ type t =
   ; mutable mapper : mapper_io
   ; cpu : Cpu.t (** Per-cycle 6502 CPU. *)
   ; ppu : Ppu.t
+  ; controller1 : Controller.t (** P1 標準コントローラ ($4016). *)
+  ; controller2 : Controller.t (** P2 標準コントローラ ($4017 read). *)
   ; memory_bus : Bus.t
   ; wram : Bytes.t
     (** 2KB の CPU 内蔵 RAM。eject / reset / power_off / connect すべてで保持される。 *)
   ; mutable ith_nmi : uint16
   ; mutable ith_reset : uint16
   ; mutable ith_irq : uint16
+  ; mutable dma_source : int option
+    (** OAMDMA pending. [Some high] の間、次の {!tick} で
+        [$XX00-$XXFF] を OAM に転送し CPU を 513/514 cycle stall させる. *)
   }
 
 (** 電源 off・カートリッジなしの NES を生成する。 実機で言えば箱から出してきた直後の状態。 *)
