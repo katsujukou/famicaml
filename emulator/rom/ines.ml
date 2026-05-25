@@ -27,7 +27,9 @@ let parse_nrom ~ofs ~prg_banks ~chr_banks data =
   let* () = need data (ofs + prg_size + chr_size) in
   let prg = Bytes.sub data ofs prg_size in
   let chr =
-    if chr_banks = 0 then Bytes.create chr_ram_size else Bytes.sub data (ofs + prg_size) chr_size
+    if chr_banks = 0
+    then Bytes.create chr_ram_size
+    else Bytes.sub data (ofs + prg_size) chr_size
   in
   Ok (Cartridge.NROM { prg; chr })
 
@@ -46,7 +48,9 @@ let parse_cnrom ~ofs ~prg_banks ~chr_banks data =
   let* () = need data (ofs + prg_size + chr_size) in
   let prg = Bytes.sub data ofs prg_size in
   let chr =
-    if chr_banks = 0 then Bytes.create chr_ram_size else Bytes.sub data (ofs + prg_size) chr_size
+    if chr_banks = 0
+    then Bytes.create chr_ram_size
+    else Bytes.sub data (ofs + prg_size) chr_size
   in
   Ok (Cartridge.CNROM { prg; chr })
 
@@ -68,7 +72,9 @@ let parse (data : bytes) : (Cartridge.t, error) result =
     let chr_banks = Bytes.get_uint8 data 5 in
     let flags6 = Bytes.get_uint8 data 6 in
     let flags7 = Bytes.get_uint8 data 7 in
-    let mirroring = if flags6 land 0x01 <> 0 then Cartridge.V else Cartridge.H in
+    let mirroring =
+      if flags6 land 0x01 <> 0 then Cartridge.V else Cartridge.H
+    in
     let has_battery = flags6 land 0x02 <> 0 in
     let has_trainer = flags6 land 0x04 <> 0 in
     (* NES 2.0 は flags7[3:2] = 0b10。その場合もニブルの扱いは同じ。 *)
@@ -81,4 +87,7 @@ let parse (data : bytes) : (Cartridge.t, error) result =
       | 3 -> parse_cnrom ~ofs ~prg_banks ~chr_banks data
       | n -> Error (Unsupported_mapper n)
     in
-    Ok { Cartridge.spec = { mirroring; has_battery; has_trainer }; Cartridge.rom })
+    Ok
+      { Cartridge.spec = { mirroring; has_battery; has_trainer }
+      ; Cartridge.rom
+      })

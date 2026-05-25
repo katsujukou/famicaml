@@ -58,7 +58,8 @@ module Processor_status : PS = struct
     then Uint8.logor (bit_of_flag f) v
     else Uint8.logand (Uint8.logxor u8_0xFF (bit_of_flag f)) v
 
-  let set_flags flags p = List.fold_left (fun v (f, b) -> set_flag f b v) p flags
+  let set_flags flags p =
+    List.fold_left (fun v (f, b) -> set_flag f b v) p flags
 end
 
 type t =

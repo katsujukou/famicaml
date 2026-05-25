@@ -2,3 +2,4 @@ exception Out_of_range
 exception Not_implemented
 exception Undefined_opcode
 exception Invalid_addressing_mode
+exception Impossible

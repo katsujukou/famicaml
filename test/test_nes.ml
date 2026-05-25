@@ -7,7 +7,8 @@ module Exn = Emulator.Exn
 (* テスト用ヘルパー                                                     *)
 (* ------------------------------------------------------------------ *)
 
-let default_spec : Cart.cart_spec = { mirroring = H; has_battery = false; has_trainer = false }
+let default_spec : Cart.cart_spec =
+  { mirroring = H; has_battery = false; has_trainer = false }
 
 let make_nrom_cart ?(spec = default_spec) ~prg_kb () =
   let prg = Bytes.create (prg_kb * 1024) in
@@ -35,8 +36,11 @@ let nes_with cart =
   Nes.connect_cartridge nes cart;
   nes
 
-let bus_read_u8 nes addr = Uint8.to_int (nes.Nes.memory_bus.read (Uint16.of_int addr))
-let bus_write_u8 nes addr v = nes.Nes.memory_bus.write (Uint16.of_int addr) (Uint8.of_int v)
+let bus_read_u8 nes addr =
+  Uint8.to_int (nes.Nes.memory_bus.read (Uint16.of_int addr))
+
+let bus_write_u8 nes addr v =
+  nes.Nes.memory_bus.write (Uint16.of_int addr) (Uint8.of_int v)
 
 (* ------------------------------------------------------------------ *)
 (* mk: 空の NES (カセットなし・電源 off)                                *)
@@ -136,8 +140,10 @@ let test_wram_roundtrip () =
 let test_unmapped_raises () =
   let _, cart = make_nrom_cart ~prg_kb:16 () in
   let nes = nes_with cart in
-  Alcotest.check_raises "$2000 read" Exn.Out_of_range (fun () -> ignore (bus_read_u8 nes 0x2000));
-  Alcotest.check_raises "$5000 write" Exn.Out_of_range (fun () -> bus_write_u8 nes 0x5000 0)
+  Alcotest.check_raises "$2000 read" Exn.Out_of_range (fun () ->
+    ignore (bus_read_u8 nes 0x2000));
+  Alcotest.check_raises "$5000 write" Exn.Out_of_range (fun () ->
+    bus_write_u8 nes 0x5000 0)
 
 (* ------------------------------------------------------------------ *)
 (* eject / connect サイクル — テニス+SMB の 256W グリッチ的シナリオ      *)
@@ -211,7 +217,8 @@ let test_connect_from_bytes () =
   let nes = Nes.mk () in
   (match Nes.connect nes buf with
    | Ok () -> ()
-   | Error e -> Alcotest.failf "connect error: %s" (Emulator.Rom.Ines.error_to_string e));
+   | Error e ->
+     Alcotest.failf "connect error: %s" (Emulator.Rom.Ines.error_to_string e));
   Alcotest.(check bool) "cart attached" true (nes.cart <> None);
   Alcotest.(check int) "RESET vec" 0x8042 (Uint16.to_int nes.ith_reset)
 
@@ -241,7 +248,10 @@ let () =
         ] )
     ; ( "ベクタ / RESET"
       , [ Alcotest.test_case "connect でベクタロード" `Quick test_vectors_on_connect
-        ; Alcotest.test_case "power_on は reset を呼ぶ" `Quick test_power_on_resets_pc
+        ; Alcotest.test_case
+            "power_on は reset を呼ぶ"
+            `Quick
+            test_power_on_resets_pc
         ] )
     ; ( "WRAM / 未マップ領域"
       , [ Alcotest.test_case "WRAM round trip" `Quick test_wram_roundtrip

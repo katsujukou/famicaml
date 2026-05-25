@@ -11,6 +11,15 @@ module Uint8 : sig
   val of_int : int -> t (* 0xFF mask *)
   val to_int : t -> int
   val to_signed : t -> uint8
+  val u8_00 : t
+  val u8_01 : t
+  val u8_02 : t
+  val u8_04 : t
+  val u8_08 : t
+  val u8_10 : t
+  val u8_20 : t
+  val u8_40 : t
+  val u8_80 : t
 
   (* 算術: すべて 8-bit でラップアラウンド *)
   val add : t -> t -> t
@@ -29,6 +38,7 @@ module Uint8 : sig
   val compare : t -> t -> int
   val bit : int -> t -> int
   val test_bit : int -> t -> bool
+  val set_bit : int -> bool -> t -> t
 
   (** デバッグ表示用 (例: "0xA9")。 *)
   val pp : Format.formatter -> t -> unit
@@ -82,6 +92,7 @@ module Uint16 : sig
   val shift_right : t -> int -> t
   val equal : t -> t -> bool
   val compare : t -> t -> int
+  val set_bit : int -> bool -> t -> t
   val pp : Format.formatter -> t -> unit
   val ( + ) : t -> t -> t
   val ( - ) : t -> t -> t

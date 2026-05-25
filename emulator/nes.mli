@@ -10,7 +10,8 @@ type t =
   ; mutable mapper : mapper_io
   ; cpu : Cpu.t
   ; memory_bus : Bus.t
-  ; wram : Bytes.t (** 2KB の CPU 内蔵 RAM。eject / reset / power_off / connect すべてで保持される。 *)
+  ; wram : Bytes.t
+    (** 2KB の CPU 内蔵 RAM。eject / reset / power_off / connect すべてで保持される。 *)
   ; mutable ith_nmi : uint16
   ; mutable ith_reset : uint16
   ; mutable ith_irq : uint16

@@ -41,8 +41,10 @@ let prg_read_unrom prg ~bank_lo cpu_addr =
 (** Cartridge の中身に応じた mapper_io を構築する。 PPU 実装まで CNROM の CHR バンク切替は無視。 *)
 let make_mapper (cart : Rom.Cartridge.t) : mapper_io =
   match cart.rom with
-  | Rom.Cartridge.NROM { prg; _ } -> { read = prg_read_fixed prg; write = (fun _ _ -> ()) }
-  | Rom.Cartridge.CNROM { prg; _ } -> { read = prg_read_fixed prg; write = (fun _ _ -> ()) }
+  | Rom.Cartridge.NROM { prg; _ } ->
+    { read = prg_read_fixed prg; write = (fun _ _ -> ()) }
+  | Rom.Cartridge.CNROM { prg; _ } ->
+    { read = prg_read_fixed prg; write = (fun _ _ -> ()) }
   | Rom.Cartridge.UNROM { prg; _ } ->
     let bank_lo = ref 0 in
     let n_banks = Bytes.length prg / 0x4000 in
@@ -66,7 +68,9 @@ type memory_map_t =
   }
 
 let memory_map =
-  { wram = { from = 0x0000; to_ = 0x1FFF }; prg_rom = { from = 0x8000; to_ = 0xFFFF } }
+  { wram = { from = 0x0000; to_ = 0x1FFF }
+  ; prg_rom = { from = 0x8000; to_ = 0xFFFF }
+  }
 
 (* ------------------------------------------------------------------ *)
 (* バス組み立て                                                         *)

@@ -296,7 +296,8 @@ let instruction_list =
 let mnemonic_table : spec option array =
   let tbl = Array.make 256 None in
   List.iter
-    (fun (code, op, mode, bytes, cycles) -> tbl.(code) <- Some { op; mode; bytes; cycles })
+    (fun (code, op, mode, bytes, cycles) ->
+       tbl.(code) <- Some { op; mode; bytes; cycles })
     instruction_list;
   tbl
 

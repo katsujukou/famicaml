@@ -180,7 +180,10 @@ let () =
       , [ Alcotest.test_case "1 PRG / CHR-RAM" `Quick test_nrom_1prg_no_chr
         ; Alcotest.test_case "2 PRG / 1 CHR" `Quick test_nrom_2prg_1chr
         ; Alcotest.test_case "mirroring vertical" `Quick test_mirroring_vertical
-        ; Alcotest.test_case "mirroring horizontal" `Quick test_mirroring_horizontal
+        ; Alcotest.test_case
+            "mirroring horizontal"
+            `Quick
+            test_mirroring_horizontal
         ; Alcotest.test_case "battery flag" `Quick test_battery_flag
         ; Alcotest.test_case "trainer present" `Quick test_trainer_present
         ; Alcotest.test_case "PRG data preserved" `Quick test_prg_data_preserved
@@ -196,8 +199,17 @@ let () =
         ] )
     ; ( "エラー系"
       , [ Alcotest.test_case "invalid magic" `Quick test_error_invalid_magic
-        ; Alcotest.test_case "truncated (no header)" `Quick test_error_truncated_no_header
-        ; Alcotest.test_case "truncated (short PRG)" `Quick test_error_truncated_short_prg
-        ; Alcotest.test_case "unsupported mapper" `Quick test_error_unsupported_mapper
+        ; Alcotest.test_case
+            "truncated (no header)"
+            `Quick
+            test_error_truncated_no_header
+        ; Alcotest.test_case
+            "truncated (short PRG)"
+            `Quick
+            test_error_truncated_short_prg
+        ; Alcotest.test_case
+            "unsupported mapper"
+            `Quick
+            test_error_unsupported_mapper
         ] )
     ]

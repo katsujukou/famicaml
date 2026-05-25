@@ -10,7 +10,9 @@ let bit7 = Uint8.of_int 0x80
 (** 値 v を見て Z, N フラグを更新する(多くの命令で共通) *)
 let set_zn (cpu : Register.t) (v : uint8) =
   cpu.reg_P
-  <- PS.set_flags [ (Z, v = Uint8.zero); (N, Uint8.logand v bit7 <> Uint8.zero) ] cpu.reg_P
+  <- PS.set_flags
+       [ (Z, v = Uint8.zero); (N, Uint8.logand v bit7 <> Uint8.zero) ]
+       cpu.reg_P
 
 let get_flag (cpu : Register.t) f = PS.get_flag f cpu.reg_P
 let set_flag (cpu : Register.t) f b = cpu.reg_P <- PS.set_flag f b cpu.reg_P
@@ -30,7 +32,10 @@ let pull (bus : Bus.t) (cpu : Register.t) : uint8 =
 let push16 (bus : Bus.t) (cpu : Register.t) (v : uint16) =
   push bus cpu (Uint8.of_int (Uint16.to_int (Uint16.shift_right v 8)));
   (* hi *)
-  push bus cpu (Uint8.of_int (Uint16.to_int (Uint16.logand v (Uint16.of_int 0xFF))))
+  push
+    bus
+    cpu
+    (Uint8.of_int (Uint16.to_int (Uint16.logand v (Uint16.of_int 0xFF))))
 (* lo *)
 
 let pull16 (bus : Bus.t) (cpu : Register.t) : uint16 =
@@ -39,7 +44,9 @@ let pull16 (bus : Bus.t) (cpu : Register.t) : uint16 =
   Uint16.(shift_left (Uint16.of_uint8 hh) 8 + of_uint8 ll)
 
 (** オペランドから「読み出し値」を取得する。 LDA/AND/ORA/EOR/ADC/SBC/CMP/BIT など read 系命令で共通。 *)
-let operand_value (bus : Bus.t) (cpu : Register.t) : Ins.operand_with_mode -> uint8 = function
+let operand_value (bus : Bus.t) (cpu : Register.t)
+  : Ins.operand_with_mode -> uint8
+  = function
   | Immediate v -> v
   | Zeropage a -> peek_zp bus a
   | Zeropage_X a -> peek_zx bus cpu a
@@ -54,7 +61,9 @@ let operand_value (bus : Bus.t) (cpu : Register.t) : Ins.operand_with_mode -> ui
 
 (** オペランドの「実効アドレス」を計算する。 STA/STX/STY/INC/DEC/ASL/LSR/ROL/ROR などメモリ書き込み命令で使う。
     Accumulator/Immediate/Implied はアドレスを持たない。 *)
-let effective_addr (bus : Bus.t) (cpu : Register.t) : Ins.operand_with_mode -> uint16 = function
+let effective_addr (bus : Bus.t) (cpu : Register.t)
+  : Ins.operand_with_mode -> uint16
+  = function
   | Zeropage a -> Uint16.of_uint8 a
   | Zeropage_X a -> Uint16.of_uint8 Uint8.(a + cpu.reg_X)
   | Zeropage_Y a -> Uint16.of_uint8 Uint8.(a + cpu.reg_Y)
@@ -86,7 +95,10 @@ let run_load (set_reg : uint8 -> unit) bus cpu arg =
 let run_lda bus cpu arg = run_load (fun v -> cpu.reg_A <- v) bus cpu arg
 let run_ldx bus cpu arg = run_load (fun v -> cpu.reg_X <- v) bus cpu arg
 let run_ldy bus cpu arg = run_load (fun v -> cpu.reg_Y <- v) bus cpu arg
-let run_store (bus : Bus.t) cpu (v : uint8) arg = bus.write (effective_addr bus cpu arg) v
+
+let run_store (bus : Bus.t) cpu (v : uint8) arg =
+  bus.write (effective_addr bus cpu arg) v
+
 let run_sta bus cpu arg = run_store bus cpu cpu.reg_A arg
 let run_stx bus cpu arg = run_store bus cpu cpu.reg_X arg
 let run_sty bus cpu arg = run_store bus cpu cpu.reg_Y arg
@@ -113,9 +125,10 @@ let run_tsx cpu =
   cpu.reg_X <- cpu.reg_SP;
   set_zn cpu cpu.reg_X
 
-let run_txs cpu = cpu.reg_SP <- cpu.reg_X (* TXS はフラグに影響しない *)
+let run_txs cpu = cpu.reg_SP <- cpu.reg_X
+(* TXS はフラグに影響しない *)
 
-                                          (* --- 算術演算 --- *)
+(* --- 算術演算 --- *)
 
 (** ADC: A = A + M + C。V と C を正しく設定する。 *)
 let run_adc bus cpu arg =

@@ -10,8 +10,12 @@ let peek_zy (bus : Bus.t) (cpu : t) (a : Bus.byte) =
   bus.read (Uint16.of_uint8 Uint8.(a + cpu.reg_Y))
 
 let peek (bus : Bus.t) (a : Bus.addr) = bus.read a
-let peek_x (bus : Bus.t) (cpu : t) (a : Bus.addr) = bus.read Uint16.(a + Uint16.of_uint8 cpu.reg_X)
-let peek_y (bus : Bus.t) (cpu : t) (a : Bus.addr) = bus.read Uint16.(a + Uint16.of_uint8 cpu.reg_Y)
+
+let peek_x (bus : Bus.t) (cpu : t) (a : Bus.addr) =
+  bus.read Uint16.(a + Uint16.of_uint8 cpu.reg_X)
+
+let peek_y (bus : Bus.t) (cpu : t) (a : Bus.addr) =
+  bus.read Uint16.(a + Uint16.of_uint8 cpu.reg_Y)
 
 let peek_ix (bus : Bus.t) (cpu : t) (a : Bus.byte) =
   let ll = bus.read (Uint16.of_uint8 Uint8.(a + cpu.reg_X)) in

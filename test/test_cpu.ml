@@ -20,7 +20,8 @@ let make_env () =
   (ram, Bus.mk ~read ~write, Cpu.mk ())
 
 (** RAM の指定オフセットにバイト列を書き込む。 *)
-let wr ram offset bytes = List.iteri (fun i b -> Bytes.set_uint8 ram (offset + i) b) bytes
+let wr ram offset bytes =
+  List.iteri (fun i b -> Bytes.set_uint8 ram (offset + i) b) bytes
 
 (** CPU を n ステップ実行する。ith_irq はデフォルト 0x0000。 *)
 let run ?(ith_irq = 0) bus cpu n =
@@ -118,7 +119,10 @@ let test_txs_no_flags () =
   (* TXS *)
   run bus cpu 1;
   chk8 "SP" 0x42 cpu.reg_SP;
-  Alcotest.(check bool) "P unchanged by TXS" true (PS.to_uint8 cpu.reg_P = p_after_ldx)
+  Alcotest.(check bool)
+    "P unchanged by TXS"
+    true
+    (PS.to_uint8 cpu.reg_P = p_after_ldx)
 
 (* ------------------------------------------------------------------ *)
 (* ADC / SBC                                                           *)
@@ -570,7 +574,8 @@ let () =
       , [ Alcotest.test_case "JMP absolute" `Quick test_jmp_abs
         ; Alcotest.test_case "JMP indirect bug" `Quick test_jmp_indirect_bug
         ] )
-    ; ("JSR / RTS", [ Alcotest.test_case "JSR + RTS roundtrip" `Quick test_jsr_rts ])
+    ; ( "JSR / RTS"
+      , [ Alcotest.test_case "JSR + RTS roundtrip" `Quick test_jsr_rts ] )
     ; ( "スタック"
       , [ Alcotest.test_case "PHA / PLA" `Quick test_pha_pla
         ; Alcotest.test_case "PHP / PLP" `Quick test_php_plp

@@ -22,7 +22,8 @@ let mirror_to_string = function
 
 let rom_summary = function
   | Cart.NROM { prg; chr } -> ("NROM", Bytes.length prg, Bytes.length chr)
-  | Cart.UNROM { prg; chr_ram } -> ("UNROM", Bytes.length prg, Bytes.length chr_ram)
+  | Cart.UNROM { prg; chr_ram } ->
+    ("UNROM", Bytes.length prg, Bytes.length chr_ram)
   | Cart.CNROM { prg; chr } -> ("CNROM", Bytes.length prg, Bytes.length chr)
 
 (* ------------------------------------------------------------------ *)
