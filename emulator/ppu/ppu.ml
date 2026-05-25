@@ -5,7 +5,6 @@ open Famicaml_common.Nesint
    等が外から見えなくなるため明示的に re-export する。 *)
 module Register = Register
 module Nametable = Nametable
-module Config = Config
 module Pattern_table = Pattern_table
 module Palette = Palette
 
