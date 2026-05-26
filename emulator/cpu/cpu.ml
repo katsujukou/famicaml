@@ -951,6 +951,7 @@ let reset_micros : micro_op list =
       cpu.reg_P <- PS.set_flag PS.I true cpu.reg_P)
   ]
 
+let opcode_base_cycles (op : int) : int = 1 + List.length (decode op)
 let request_nmi (cpu : t) = cpu.nmi_pending <- true
 let request_irq (cpu : t) = cpu.irq_pending <- true
 let request_reset (cpu : t) = cpu.reset_pending <- true

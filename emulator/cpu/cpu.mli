@@ -70,6 +70,11 @@ val tick : Bus.t -> t -> unit
     させた上で cycle 数を返す。 *)
 val step_instruction : Bus.t -> t -> int
 
+(** Opcode の "base" cycle 数 (= 1 cycle opcode fetch + decode が返す
+    micro_op list 長). branch taken / page-cross 等の動的 penalty は
+    含まない. cycle audit 用. *)
+val opcode_base_cycles : int -> int
+
 (** NMI 要求。次の命令境界で 7 cycle の NMI シーケンスが実行され、
     PC ← [$FFFA/B] となる。Edge-triggered: サービス時に自動クリア
     されるので、PPU 等は vblank 突入の瞬間にのみ呼ぶこと
