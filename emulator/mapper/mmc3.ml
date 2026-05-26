@@ -161,7 +161,8 @@ let cpu_read t addr =
   then
     if t.prg_ram_enable
     then Bytes.get_uint8 t.prg_ram (addr - 0x6000)
-    else (* PRG-RAM disabled: 実機は open bus (= 直前 data bus 値) を返す.
+    else
+      (* PRG-RAM disabled: 実機は open bus (= 直前 data bus 値) を返す.
             近似として「アドレスの上位 byte」を返す (大抵の場合これが
             opcode fetch 直後の bus 値と一致する). SMB3 の IRQ handler が
             $7AFF を open bus で参照してるため必要. *)
