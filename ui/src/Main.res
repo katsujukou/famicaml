@@ -93,6 +93,10 @@ type htmlCanvasElement
 
 external asCanvas: Dom.element => htmlCanvasElement = "%identity"
 
+type htmlInputElement
+@set external setInputValue: (htmlInputElement, string) => unit = "value"
+external asInput: Dom.element => htmlInputElement = "%identity"
+
 /* ---- .pal ダウンロード/アップロード ---- */
 
 type blob
@@ -229,6 +233,17 @@ let renderNesFrame = (ref_: React.ref<Nullable.t<Dom.element>>) => {
   }
 }
 
+/* canvas を単色で塗りつぶす. Power OFF (黒) / cart 未挿入 (グレー) 表示用. */
+let fillNesCanvas = (ref_: React.ref<Nullable.t<Dom.element>>, color: string) => {
+  switch ref_.current->Nullable.toOption {
+  | Some(elt) =>
+    let ctx = getContext2d(asCanvas(elt))
+    setFillStyle(ctx, color)
+    fillRect(ctx, 0, 0, 256, 240)
+  | None => ()
+  }
+}
+
 /* canvas に pattern table を描画 (cart 未挿入時はグレーアウト). */
 let renderPatternTable = (ref_: React.ref<Nullable.t<Dom.element>>, idx: int) => {
   switch (Nullable.toOption(famiCaml), ref_.current->Nullable.toOption) {
@@ -355,6 +370,7 @@ module App = {
     let canvasLeft = React.useRef(Nullable.null)
     let canvasRight = React.useRef(Nullable.null)
     let canvasNes = React.useRef(Nullable.null)
+    let romFileInput = React.useRef(Nullable.null)
 
     /* Palette 状態。wasm 側の真値をミラーする。
        UI からの編集はまず wasm を呼んでから state に reflect する. */
@@ -518,6 +534,25 @@ module App = {
     | Some(s) => s.power
     | None => false
     }
+    let hasCart = switch state {
+    | Some(s) => Nullable.toOption(s.cart)->Option.isSome
+    | None => false
+    }
+
+    /* 画面の電源/カート状態が変わった時、走ってなければ blank で塗る:
+         電源 OFF              → 真っ黒
+         電源 ON + cart 無し   → グレー
+         電源 ON + cart 有り   → そのまま (走ってれば rafLoop が描画) */
+    React.useEffect3(() => {
+      if !running {
+        if !powerOn {
+          fillNesCanvas(canvasNes, "#000")
+        } else if !hasCart {
+          fillNesCanvas(canvasNes, "#808080")
+        }
+      }
+      None
+    }, (powerOn, hasCart, running))
 
     /* AudioContext + AudioWorklet を lazy 初期化 (user gesture 必要なので
        Power ON 押下時に呼ぶ). 初回成功で audioReadyRef.current = true. */
@@ -632,7 +667,13 @@ module App = {
       withApi(api => {
         api.powerOff()
         api.eject()
+        setState(_ => Some(api.state()))
       })
+      setSelectedName(_ => "")
+      switch Nullable.toOption(romFileInput.current) {
+      | Some(el) => setInputValue(asInput(el), "")
+      | None => ()
+      }
     }
     let onReset = _ => withApi(api => api.reset())
 
@@ -858,7 +899,12 @@ module App = {
         {React.string("対応マッパー: NROM (0) / UNROM (2) / CNROM (3)")}
       </p>
       <section style={{marginTop: "1rem"}}>
-        <input type_="file" accept=".nes" onChange={onRomChange} />
+        <input
+          type_="file"
+          accept=".nes"
+          onChange={onRomChange}
+          ref={ReactDOM.Ref.domRef(romFileInput)}
+        />
         {selectedName == ""
           ? React.null
           : <p style={{marginTop: "0.5rem", color: "#444"}}>
