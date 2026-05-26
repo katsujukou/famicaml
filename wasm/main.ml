@@ -104,27 +104,28 @@ let state_js () =
 let pattern_table_js (idx : int) =
   match nes.cart with
   | None -> Js.null
-  | Some cart ->
-    let chr = Cart.chr_bytes cart in
-    let table_ofs = idx * 0x1000 in
-    if Bytes.length chr < table_ofs + 0x1000
-    then Js.null
-    else (
-      let pixels = Pattern_table.decode_table ~chr ~table_ofs in
-      let master =
-        match
-          Palette.of_pal_bytes (Emulator.Ppu.get_master_palette nes.ppu)
-        with
-        | Ok p -> p
-        | Error _ -> Palette.default ()
-      in
-      let rgba = Palette.pixels_to_rgba pixels ~master ~sub:!viewer_sub in
-      Js.some
-        (object%js
-           val width = 128
-           val height = 128
-           val rgba = uint8array_of_bytes rgba
-        end))
+  | Some _ ->
+    (* PPU の chr_io 経由で現在の bank 状態 ($0000-$0FFF or $1000-$1FFF) を
+       読む. これにより MMC1/MMC3 等の bank 切替に追従する. *)
+    let chr = Bytes.create 0x1000 in
+    let base = idx * 0x1000 in
+    for i = 0 to 0x0FFF do
+      Bytes.set_uint8 chr i
+        (Famicaml_common.Nesint.Uint8.to_int (nes.ppu.chr_io.chr_read (base + i)))
+    done;
+    let pixels = Pattern_table.decode_table ~chr ~table_ofs:0 in
+    let master =
+      match Palette.of_pal_bytes (Emulator.Ppu.get_master_palette nes.ppu) with
+      | Ok p -> p
+      | Error _ -> Palette.default ()
+    in
+    let rgba = Palette.pixels_to_rgba pixels ~master ~sub:!viewer_sub in
+    Js.some
+      (object%js
+         val width = 128
+         val height = 128
+         val rgba = uint8array_of_bytes rgba
+      end)
 
 (* ------------------------------------------------------------------ *)
 (* Palette API                                                          *)
