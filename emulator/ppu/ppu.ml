@@ -1254,18 +1254,30 @@ let render_sprites (ppu : t) : unit =
     Visible/pre-render scanline では BG fetch pipeline + DrawPixel を回す.
     Sprite renderer は当面 per-frame (vblank で render_sprites を呼ぶ). *)
 let step (ppu : t) : unit =
-  (* (1) dot/scanline 進行 *)
-  let next_dot = ppu.dot + 1 in
-  if next_dot < 341
-  then ppu.dot <- next_dot
-  else (
+  (* (1) dot/scanline 進行
+     NTSC PPU の odd-frame skip: pre-render scanline (261) の dot 339 から
+     次フレーム (0,0) に直接ジャンプ (dot 340 をスキップ). rendering 有効時のみ.
+     これにより 2-frame 平均が 89341.5 dot = 正確な NTSC frame rate. 未実装だと
+     CPU との位相が徐々にずれ、MMC3 IRQ split 位置がフレーム間で揺らぐ. *)
+  let rendering_now = ppu.mask.enable_bg || ppu.mask.enable_sprite in
+  let odd_frame = ppu.frame land 1 = 1 in
+  if ppu.scanline = 261 && ppu.dot = 339 && rendering_now && odd_frame
+  then (
     ppu.dot <- 0;
-    let next_sl = ppu.scanline + 1 in
-    if next_sl < 262
-    then ppu.scanline <- next_sl
+    ppu.scanline <- 0;
+    ppu.frame <- ppu.frame + 1)
+  else (
+    let next_dot = ppu.dot + 1 in
+    if next_dot < 341
+    then ppu.dot <- next_dot
     else (
-      ppu.scanline <- 0;
-      ppu.frame <- ppu.frame + 1));
+      ppu.dot <- 0;
+      let next_sl = ppu.scanline + 1 in
+      if next_sl < 262
+      then ppu.scanline <- next_sl
+      else (
+        ppu.scanline <- 0;
+        ppu.frame <- ppu.frame + 1)));
   let sl = ppu.scanline in
   let d = ppu.dot in
   let rendering_enabled = ppu.mask.enable_bg || ppu.mask.enable_sprite in
@@ -1301,9 +1313,13 @@ let step (ppu : t) : unit =
   then
     ppu.status
     <- { vblank_flag = false; sprite_0_hit = false; sprite_overflow = false };
-  (* (8) MMC3 A12 rise 通知. 簡易: dot 260 で 1 回. *)
+  (* MMC3 A12 rise 通知. 簡易: dot 260 で 1 回.
+     dot-accurate な A12 transition tracking は sprite fetch を dot 257-320 に
+     分散する必要があり (現状は dot 257 で 8 sprite 一括 fetch)、未実装.
+     SMB3 等は per-scanline で 1 rise 期待してるので、現状の simplification で
+     正しく動作する. *)
   if
-    rendering_enabled
+    (ppu.mask.enable_bg || ppu.mask.enable_sprite)
     && (sl < 240 || sl = 261)
     && d = 260
   then ppu.chr_io.a12_rise ()
