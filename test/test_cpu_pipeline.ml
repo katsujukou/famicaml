@@ -612,11 +612,16 @@ let test_irq_serviced_when_i_clear () =
   let ram, bus, cpu = make_env () in
   set_vectors ram ~nmi:0 ~reset:0 ~irq:0xA000;
   cpu.reg_PC <- Uint16.of_int 0x8000;
-  (* CLI で I=0 にしてから IRQ *)
-  wr ram 0x8000 [ 0x58 ];
+  (* CLI で I=0 にしてから IRQ. 実機 6502 仕様: CLI 直後の 1 命令は IRQ で
+     割り込まれない (penultimate-cycle polling のため). よって CLI ; NOP ; IRQ
+     entry の順. *)
+  wr ram 0x8000 [ 0x58; 0xEA ];
   let _ = P.step_instruction bus cpu in
   chkb "I=0 after CLI" false (flag cpu PS.I);
   P.request_irq cpu;
+  let nop_cycles = P.step_instruction bus cpu in
+  Alcotest.(check int) "NOP runs after CLI (delay)" 2 nop_cycles;
+  chkb "irq still pending" true cpu.irq_pending;
   let cycles = P.step_instruction bus cpu in
   Alcotest.(check int) "IRQ = 7 cycle" 7 cycles;
   chk16 "PC = $A000" 0xA000 cpu.reg_PC;
@@ -642,11 +647,15 @@ let test_irq_pushed_p_has_b_zero () =
   let ram, bus, cpu = make_env () in
   set_vectors ram ~nmi:0 ~reset:0 ~irq:0xA000;
   cpu.reg_PC <- Uint16.of_int 0x8000;
-  wr ram 0x8000 [ 0x58 ];
+  wr ram 0x8000 [ 0x58; 0xEA ];
   let _ = P.step_instruction bus cpu in
-  let sp_before = Uint8.to_int cpu.reg_SP in
+  (* CLI *)
   P.request_irq cpu;
   let _ = P.step_instruction bus cpu in
+  (* NOP (CLI delay) *)
+  let sp_before = Uint8.to_int cpu.reg_SP in
+  let _ = P.step_instruction bus cpu in
+  (* IRQ entry *)
   let pushed_p = Bytes.get_uint8 ram (0x100 + sp_before - 2) in
   Alcotest.(check int) "IRQ pushed P bit 4 (B) = 0" 0 (pushed_p land 0x10)
 

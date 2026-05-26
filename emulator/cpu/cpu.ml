@@ -36,6 +36,13 @@ type t =
   ; mutable nmi_pending : bool
   ; mutable irq_pending : bool
   ; mutable reset_pending : bool
+    (* 6502 は IRQ を命令の penultimate (= 後ろから 2 番目) cycle で sample
+       する. 命令境界 dispatch 時は「2 cycle 前の IRQ 状態」を使う必要がある.
+       irq_latch_b は 2 cycle 前の (irq_pending && !I), irq_latch_a は 1 cycle 前.
+       同じ仕組みを NMI にも適用. 結果: CLI/SEI/PLP の I flag 変更が IRQ
+       delivery に 1 命令分の delay として現れる (実機通り). *)
+  ; mutable irq_latch_a : bool
+  ; mutable irq_latch_b : bool
   }
 
 and micro_op = t -> Bus.t -> unit
@@ -58,6 +65,8 @@ let mk () =
   ; nmi_pending = false
   ; irq_pending = false
   ; reset_pending = false
+  ; irq_latch_a = false
+  ; irq_latch_b = false
   }
 
 (* ------------------------------------------------------------------ *)
@@ -979,7 +988,7 @@ let dispatch_interrupt_if_pending (cpu : t) : unit =
   then (
     cpu.nmi_pending <- false;
     cpu.pending <- nmi_micros)
-  else if cpu.irq_pending && not (PS.get_flag PS.I cpu.reg_P)
+  else if cpu.irq_latch_b
   then (
     cpu.irq_pending <- false;
     cpu.pending <- irq_micros)
@@ -991,6 +1000,13 @@ let tick (bus : Bus.t) (cpu : t) : unit =
    | m :: rest ->
      cpu.pending <- rest;
      m cpu bus);
+  (* IRQ sampling: penultimate-cycle polling を 2 段 latch でモデル化.
+     dispatch は latch_b を使う (= 2 cycle 前の "irq_pending && !I" 状態).
+     これで CLI/SEI 直後の 1 命令分の delay が再現される (実機通り).
+     NMI は edge-triggered で CLI/SEI 影響を受けないため即時 dispatch のまま. *)
+  let irq_now = cpu.irq_pending && not (PS.get_flag PS.I cpu.reg_P) in
+  cpu.irq_latch_b <- cpu.irq_latch_a;
+  cpu.irq_latch_a <- irq_now;
   cpu.cycles <- cpu.cycles + 1
 
 let step_instruction (bus : Bus.t) (cpu : t) : int =

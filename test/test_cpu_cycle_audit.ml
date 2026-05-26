@@ -281,6 +281,36 @@ let test_sta_indirect_y_always_6 () =
   let c = Cpu.step_instruction bus cpu in
   Alcotest.(check int) "STA (zp),Y = 6 cyc (always)" 6 c
 
+(* ------------------------------------------------------------------ *)
+(* IRQ delivery timing (NESdev: 命令 N の penultimate cycle で sample) *)
+(*                                                                     *)
+(* 帰結: CLI 直後の 1 命令は IRQ で割り込まれない. その次の命令完了後  *)
+(*       に IRQ entry が始まる.                                         *)
+(* ------------------------------------------------------------------ *)
+
+let test_cli_then_one_instruction_then_irq () =
+  let ram, bus, cpu = make_env () in
+  (* IRQ vector に $9000 *)
+  Bytes.set_uint8 ram 0xFFFE 0x00;
+  Bytes.set_uint8 ram 0xFFFF 0x90;
+  cpu.reg_P <- PS.set_flag PS.I true cpu.reg_P;
+  wr ram 0 [ 0x78; 0x58; 0xEA; 0xEA; 0xEA ];
+  (* SEI ; CLI ; NOP ; NOP ; NOP *)
+  let _ = Cpu.step_instruction bus cpu in
+  (* SEI: I=1 *)
+  Cpu.request_irq cpu;
+  let _ = Cpu.step_instruction bus cpu in
+  (* CLI: I=0 *)
+  let _ = Cpu.step_instruction bus cpu in
+  (* NOP — 実機仕様により CLI 直後はまだ割り込まれない *)
+  Alcotest.(check int)
+    "NOP 後はまだ PC は通常コード ($0003 NOP)"
+    0x0003
+    (Uint16.to_int cpu.reg_PC);
+  let _ = Cpu.step_instruction bus cpu in
+  (* 2 個目の NOP の fetch 時に IRQ entry が始まる *)
+  Alcotest.(check int) "2 命令目開始時 IRQ entry → PC = vector" 0x9000 (Uint16.to_int cpu.reg_PC)
+
 let () =
   Alcotest.run
     "CPU cycle audit"
@@ -298,6 +328,12 @@ let () =
             "taken + page cross = 4 cyc"
             `Quick
             test_branch_taken_with_page_cross
+        ] )
+    ; ( "IRQ delivery timing"
+      , [ Alcotest.test_case
+            "CLI 後 1 命令で IRQ entry (現状 bug 確認)"
+            `Quick
+            test_cli_then_one_instruction_then_irq
         ] )
     ; ( "abs,Y / (zp),Y page cross"
       , [ Alcotest.test_case

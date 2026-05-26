@@ -48,6 +48,8 @@ type t =
   ; mutable nmi_pending : bool
   ; mutable irq_pending : bool
   ; mutable reset_pending : bool
+  ; mutable irq_latch_a : bool
+  ; mutable irq_latch_b : bool
   }
 
 (** 初期状態の CPU を生成する。PC=0, A=X=Y=0, SP=$FD, P=I|R,
