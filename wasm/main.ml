@@ -110,8 +110,11 @@ let pattern_table_js (idx : int) =
     let chr = Bytes.create 0x1000 in
     let base = idx * 0x1000 in
     for i = 0 to 0x0FFF do
-      Bytes.set_uint8 chr i
-        (Famicaml_common.Nesint.Uint8.to_int (nes.ppu.chr_io.chr_read (base + i)))
+      Bytes.set_uint8
+        chr
+        i
+        (Famicaml_common.Nesint.Uint8.to_int
+           (nes.ppu.chr_io.chr_read (base + i)))
     done;
     let pixels = Pattern_table.decode_table ~chr ~table_ofs:0 in
     let master =

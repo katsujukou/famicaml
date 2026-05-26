@@ -66,9 +66,8 @@ let test_vertical_copy_in_pre_render () =
   ppu.mask <- { ppu.mask with enable_bg = true };
   (* t: fine_y=7, coarse_Y=29, NT_y=1 → t bits 14-12 (fine_y) + 11 (NT_y) + 9-5 (coarse_Y) *)
   let t_v =
-    (7 lsl 12) (* fine_y = 7 *)
-    lor (1 lsl 11) (* NT_y = 1 *)
-    lor (29 lsl 5) (* coarse_Y = 29 *)
+    (7 lsl 12) (* fine_y = 7 *) lor (1 lsl 11) (* NT_y = 1 *) lor (29 lsl 5)
+    (* coarse_Y = 29 *)
   in
   ppu.internal.t <- u16 t_v;
   ppu.internal.v <- u16 0;
@@ -76,7 +75,10 @@ let test_vertical_copy_in_pre_render () =
   step_n ppu ((261 * 341) + 280);
   let v = Uint16.to_int ppu.internal.v in
   let mask = 0x7BE0 in
-  Alcotest.(check int) "v[vert bits] = t[vert bits]" (t_v land mask) (v land mask)
+  Alcotest.(check int)
+    "v[vert bits] = t[vert bits]"
+    (t_v land mask)
+    (v land mask)
 
 let test_no_v_update_when_rendering_off () =
   let ppu = make_ppu_with_chr ~chr_io:(empty_chr_io ()) () in
@@ -215,7 +217,10 @@ let () =
             "horizontal copy at dot 257"
             `Quick
             test_horizontal_copy_at_dot_257
-        ; Alcotest.test_case "Y inc at dot 256" `Quick test_y_increment_at_dot_256
+        ; Alcotest.test_case
+            "Y inc at dot 256"
+            `Quick
+            test_y_increment_at_dot_256
         ; Alcotest.test_case
             "vertical copy at pre-render dot 280"
             `Quick

@@ -87,8 +87,6 @@ type t =
     (** vblank 突入時かつ PPUCTRL.V=1 なら立つ。CPU へ転写されたら
             呼び出し側 (Nes) がクリアする想定。 *)
   ; mutable frame_complete : bool
-    (** vblank 突入 (scanline 241 dot 1) に達した瞬間に立つ。
-            run_until_frame が観測してクリアする. *)
     (* ----- BG fetch pipeline (Phase B6: Mesen-style per-pixel) -----
        Visible/pre-render scanline の dot 1-256 + 321-336 で 8 dot 1 周期の
        fetch cycle を回す:
@@ -97,6 +95,8 @@ type t =
          dot %8 = 5-6: PT lo byte     → pt_lo_latch
          dot %8 = 7-8: PT hi byte     → pt_hi_latch + reload shift regs
        BG pixel は bg_shift_{lo,hi} を fine_x で選んで出力. *)
+    (** vblank 突入 (scanline 241 dot 1) に達した瞬間に立つ。
+            run_until_frame が観測してクリアする. *)
   ; mutable nt_latch : int
   ; mutable at_latch : int
   ; mutable pt_lo_latch : int
@@ -107,14 +107,15 @@ type t =
   ; mutable at_shift_hi : int
   ; mutable at_next_lo : int (* 次タイルの attribute bit (reload 時に shift reg に拡散) *)
   ; mutable at_next_hi : int
-  ; palette_r_cache : int array (** Lazy cache: palette + grayscale + emphasis 適用済み (32 entries). *)
+  ; palette_r_cache : int array
+    (** Lazy cache: palette + grayscale + emphasis 適用済み (32 entries). *)
   ; palette_g_cache : int array
   ; palette_b_cache : int array
   ; mutable palette_cache_dirty : bool
-    (** palette_ram / PPUMASK の書き換えで true. draw 時に再計算→false. *)
     (* ----- Sprite pipeline (Phase B7) -----
        各 scanline 終了時に "次 scanline 用の 8 sprites" を eval + pattern fetch して
        下記配列に積む. 次 scanline の dot 1-256 で各 dot ごとに 8 個を x 範囲走査. *)
+    (** palette_ram / PPUMASK の書き換えで true. draw 時に再計算→false. *)
   ; sprite_pattern_lo : int array (** 8 entries *)
   ; sprite_pattern_hi : int array
   ; sprite_x : int array
@@ -557,7 +558,7 @@ let inc_coarse_x (ppu : t) : unit =
   let v = Uint16.to_int ppu.internal.v in
   let v =
     if v land 0x001F = 31
-    then (v land lnot 0x001F) lxor 0x0400 (* coarse X=0, switch H NT *)
+    then v land lnot 0x001F lxor 0x0400 (* coarse X=0, switch H NT *)
     else v + 1
   in
   ppu.internal.v <- Uint16.of_int (v land 0x7FFF)
@@ -577,7 +578,7 @@ let inc_y (ppu : t) : unit =
         then (v, 0) (* coarse Y=0, no NT switch *)
         else (v, y + 1)
       in
-      (v land lnot 0x03E0) lor (y lsl 5))
+      v land lnot 0x03E0 lor (y lsl 5))
   in
   ppu.internal.v <- Uint16.of_int (v land 0x7FFF)
 
@@ -586,14 +587,14 @@ let copy_horizontal (ppu : t) : unit =
   let v = Uint16.to_int ppu.internal.v in
   let t = Uint16.to_int ppu.internal.t in
   let mask = 0x041F in
-  ppu.internal.v <- Uint16.of_int ((v land lnot mask) lor (t land mask))
+  ppu.internal.v <- Uint16.of_int (v land lnot mask lor (t land mask))
 
 let copy_vertical (ppu : t) : unit =
   (* v[5..9,11..14] = t[5..9,11..14] *)
   let v = Uint16.to_int ppu.internal.v in
   let t = Uint16.to_int ppu.internal.t in
   let mask = 0x7BE0 in
-  ppu.internal.v <- Uint16.of_int ((v land lnot mask) lor (t land mask))
+  ppu.internal.v <- Uint16.of_int (v land lnot mask lor (t land mask))
 
 (* BG fetch helpers *)
 let fetch_nt_byte (ppu : t) : int =
@@ -606,7 +607,7 @@ let fetch_at_byte (ppu : t) : int =
   let nt = v land 0x0C00 in
   let coarse_x = v land 0x001F in
   let coarse_y = (v land 0x03E0) lsr 5 in
-  let addr = 0x23C0 lor nt lor ((coarse_y / 4) * 8) lor (coarse_x / 4) in
+  let addr = 0x23C0 lor nt lor (coarse_y / 4 * 8) lor (coarse_x / 4) in
   let at = Uint8.to_int (ppu_bus_read ppu addr) in
   let shift = ((coarse_y land 2) lsl 1) lor (coarse_x land 2) in
   (at lsr shift) land 0b11
@@ -626,16 +627,16 @@ let fetch_pt_hi_byte (ppu : t) : int =
   Uint8.to_int (ppu_bus_read ppu addr)
 
 let reload_bg_shifts (ppu : t) : unit =
-  ppu.bg_shift_lo <- (ppu.bg_shift_lo land 0xFF00) lor ppu.pt_lo_latch;
-  ppu.bg_shift_hi <- (ppu.bg_shift_hi land 0xFF00) lor ppu.pt_hi_latch;
+  ppu.bg_shift_lo <- ppu.bg_shift_lo land 0xFF00 lor ppu.pt_lo_latch;
+  ppu.bg_shift_hi <- ppu.bg_shift_hi land 0xFF00 lor ppu.pt_hi_latch;
   ppu.at_next_lo <- ppu.at_latch land 1;
   ppu.at_next_hi <- (ppu.at_latch lsr 1) land 1
 
 let shift_bg_regs (ppu : t) : unit =
   ppu.bg_shift_lo <- (ppu.bg_shift_lo lsl 1) land 0xFFFF;
   ppu.bg_shift_hi <- (ppu.bg_shift_hi lsl 1) land 0xFFFF;
-  ppu.at_shift_lo <- ((ppu.at_shift_lo lsl 1) land 0xFF) lor ppu.at_next_lo;
-  ppu.at_shift_hi <- ((ppu.at_shift_hi lsl 1) land 0xFF) lor ppu.at_next_hi
+  ppu.at_shift_lo <- (ppu.at_shift_lo lsl 1) land 0xFF lor ppu.at_next_lo;
+  ppu.at_shift_hi <- (ppu.at_shift_hi lsl 1) land 0xFF lor ppu.at_next_hi
 
 (* 8 dot 周期の fetch: dot %8 = 1 NT, 3 AT, 5 PT_lo, 7 PT_hi reload.
    dot 257 で reload もう一発 (= dot 256 で fetched data の最後の reload). *)
@@ -699,7 +700,8 @@ let refresh_palette_cache_inplace (ppu : t) : unit =
 
 (* Draw pixel for visible scanline 0..239 at dot 1..256. Per-pixel BG output. *)
 let draw_bg_pixel (ppu : t) : unit =
-  if ppu.palette_cache_dirty then (
+  if ppu.palette_cache_dirty
+  then (
     refresh_palette_cache_inplace ppu;
     ppu.palette_cache_dirty <- false);
   let r_cache = ppu.palette_r_cache in
@@ -719,7 +721,9 @@ let draw_bg_pixel (ppu : t) : unit =
   (* Leftmost 8 px BG clip *)
   let clipped = x < 8 && not ppu.mask.enable_bg_left_column in
   let visible = ppu.mask.enable_bg && not clipped in
-  let pal_idx = if (not visible) || bg_color = 0 then 0 else (bg_palette * 4) + bg_color in
+  let pal_idx =
+    if (not visible) || bg_color = 0 then 0 else (bg_palette * 4) + bg_color
+  in
   let r = Array.unsafe_get r_cache pal_idx in
   let g = Array.unsafe_get g_cache pal_idx in
   let b = Array.unsafe_get b_cache pal_idx in
@@ -953,9 +957,7 @@ let sprite_pat_addr (ppu : t) ~(tile_byte : int) ~(fine_y : int) : int =
   | Register.Ppu_control.Spr_8x16 ->
     let base = if tile_byte land 1 = 0 then 0x0000 else 0x1000 in
     let bt = tile_byte land 0xFE in
-    let st, sy =
-      if fine_y < 8 then (bt, fine_y) else (bt + 1, fine_y - 8)
-    in
+    let st, sy = if fine_y < 8 then (bt, fine_y) else (bt + 1, fine_y - 8) in
     base + (st * 16) + sy
 
 (* Evaluate sprites for scanline [next_sl] (0..239). Populate sprite_*[]
@@ -969,7 +971,7 @@ let evaluate_sprites_for (ppu : t) ~(next_sl : int) : unit =
     let base = !i * 4 in
     let y = Char.code (Bytes.unsafe_get ppu.oam base) in
     if next_sl >= y && next_sl < y + height
-    then (
+    then
       if ppu.sprite_count < 8
       then (
         let slot = ppu.sprite_count in
@@ -999,7 +1001,7 @@ let evaluate_sprites_for (ppu : t) ~(next_sl : int) : unit =
       else (
         (* > 8 sprites in range → set overflow. 実機の hardware bug 再現は省略. *)
         ppu.status <- { ppu.status with sprite_overflow = true };
-        overflow := true));
+        overflow := true);
     incr i
   done
 
@@ -1009,10 +1011,13 @@ let evaluate_sprites_for (ppu : t) ~(next_sl : int) : unit =
 let resolve_sprite_line (ppu : t) : unit =
   (* Clear line buffer. *)
   Array.fill ppu.sprite_line_color 0 256 (-1);
-  if not ppu.mask.enable_sprite || ppu.sprite_count = 0 then ()
-  else (
-    (* 低 index sprite が前面 → 高 index から書いて低 index で上書きする. *)
-    for s = ppu.sprite_count - 1 downto 0 do
+  if (not ppu.mask.enable_sprite) || ppu.sprite_count = 0
+  then ()
+  else
+    for
+      (* 低 index sprite が前面 → 高 index から書いて低 index で上書きする. *)
+      s = ppu.sprite_count - 1 downto 0
+    do
       let sx = Array.unsafe_get ppu.sprite_x s in
       let pat_lo = Array.unsafe_get ppu.sprite_pattern_lo s in
       let pat_hi = Array.unsafe_get ppu.sprite_pattern_hi s in
@@ -1034,17 +1039,20 @@ let resolve_sprite_line (ppu : t) : unit =
             Array.unsafe_set ppu.sprite_line_behind x behind;
             Array.unsafe_set ppu.sprite_line_is_zero x is_zero))
       done
-    done)
+    done
 
 (* DrawPixel sprite (called at visible dot 1..256, scanline 0..239).
    BG は draw_bg_pixel が既に framebuffer + bg_mask に書いてる. *)
 let draw_sprite_pixel (ppu : t) : unit =
-  if not ppu.mask.enable_sprite then ()
+  if not ppu.mask.enable_sprite
+  then ()
   else (
     let x = ppu.dot - 1 in
     let pal_idx = Array.unsafe_get ppu.sprite_line_color x in
-    if pal_idx < 0 then () (* transparent *)
-    else if x < 8 && not ppu.mask.enable_spr_left_column then ()
+    if pal_idx < 0
+    then () (* transparent *)
+    else if x < 8 && not ppu.mask.enable_spr_left_column
+    then ()
     else (
       let y = ppu.scanline in
       let bg_off = (y * 256) + x in
@@ -1057,10 +1065,10 @@ let draw_sprite_pixel (ppu : t) : unit =
         && bg_opaque
         && x <> 255
         && ppu.mask.enable_bg
-        && not ppu.status.sprite_0_hit
+        && (not ppu.status.sprite_0_hit)
         && not
              (x < 8
-              && (not ppu.mask.enable_bg_left_column
+              && ((not ppu.mask.enable_bg_left_column)
                   || not ppu.mask.enable_spr_left_column))
       then ppu.status <- { ppu.status with sprite_0_hit = true };
       (* Priority: front か bg transparent なら sprite 描画 *)
@@ -1288,15 +1296,18 @@ let step (ppu : t) : unit =
   then (
     (* dot 0 で sprite line を一気に解決. 以降 dot は配列 lookup のみ. *)
     if d = 0 then resolve_sprite_line ppu;
-    if d >= 1 && d <= 256 then (
+    if d >= 1 && d <= 256
+    then (
       draw_bg_pixel ppu;
       draw_sprite_pixel ppu);
     bg_fetch_at_dot ppu);
   (* (3.5) Sprite eval for NEXT scanline. dot 257 で実行 (実機 dot 257-320 の代表). *)
   if d = 257 && rendering_enabled
-  then (
-    if sl < 239 then evaluate_sprites_for ppu ~next_sl:(sl + 1)
-    else if sl = 261 then evaluate_sprites_for ppu ~next_sl:0);
+  then
+    if sl < 239
+    then evaluate_sprites_for ppu ~next_sl:(sl + 1)
+    else if sl = 261
+    then evaluate_sprites_for ppu ~next_sl:0;
   (* (4) Pre-render scanline (261): fetch pipeline + vertical copy *)
   if sl = 261 && rendering_enabled
   then (

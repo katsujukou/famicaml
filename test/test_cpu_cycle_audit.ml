@@ -12,8 +12,7 @@ let make_env () =
   let bus =
     Bus.mk
       ~read:(fun a -> Uint8.of_int (Bytes.get_uint8 ram (Uint16.to_int a)))
-      ~write:(fun a v ->
-        Bytes.set_uint8 ram (Uint16.to_int a) (Uint8.to_int v))
+      ~write:(fun a v -> Bytes.set_uint8 ram (Uint16.to_int a) (Uint8.to_int v))
   in
   let cpu = Cpu.mk () in
   cpu.reg_PC <- Uint16.zero;
@@ -22,7 +21,6 @@ let make_env () =
 
 let wr ram start bytes =
   List.iteri (fun i b -> Bytes.set_uint8 ram (start + i) b) bytes
-
 
 (* (opcode, mnemonic, base cycle) のテーブル. *)
 let opcodes =
@@ -200,11 +198,11 @@ let opcodes =
 let test_all_opcodes_base_cycles () =
   List.iter
     (fun (op, name, expected) ->
-      let actual = Cpu.opcode_base_cycles op in
-      Alcotest.(check int)
-        (Printf.sprintf "$%02X %s = %d cyc" op name expected)
-        expected
-        actual)
+       let actual = Cpu.opcode_base_cycles op in
+       Alcotest.(check int)
+         (Printf.sprintf "$%02X %s = %d cyc" op name expected)
+         expected
+         actual)
     opcodes
 
 let test_count_covered () =
@@ -309,7 +307,10 @@ let test_cli_then_one_instruction_then_irq () =
     (Uint16.to_int cpu.reg_PC);
   let _ = Cpu.step_instruction bus cpu in
   (* 2 個目の NOP の fetch 時に IRQ entry が始まる *)
-  Alcotest.(check int) "2 命令目開始時 IRQ entry → PC = vector" 0x9000 (Uint16.to_int cpu.reg_PC)
+  Alcotest.(check int)
+    "2 命令目開始時 IRQ entry → PC = vector"
+    0x9000
+    (Uint16.to_int cpu.reg_PC)
 
 let () =
   Alcotest.run
@@ -323,7 +324,10 @@ let () =
             test_all_opcodes_base_cycles
         ] )
     ; ( "Branch penalty"
-      , [ Alcotest.test_case "not taken = 2 cyc" `Quick test_branch_not_taken_2cyc
+      , [ Alcotest.test_case
+            "not taken = 2 cyc"
+            `Quick
+            test_branch_not_taken_2cyc
         ; Alcotest.test_case
             "taken + page cross = 4 cyc"
             `Quick
