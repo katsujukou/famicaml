@@ -163,11 +163,35 @@ let test_error_truncated_short_prg () =
   | _ -> Alcotest.fail "expected Truncated_data"
 
 let test_error_unsupported_mapper () =
-  (* mapper 4 = MMC3: flags6[7:4]=4 → flags6=0x40 *)
-  let data = make_rom ~flags6:0x40 ~prg_banks:1 ~chr_banks:0 () in
+  (* mapper 5 = MMC5: flags6[7:4]=5 → flags6=0x50 *)
+  let data = make_rom ~flags6:0x50 ~prg_banks:1 ~chr_banks:0 () in
   match Ines.parse data with
-  | Error (Ines.Unsupported_mapper 4) -> ()
-  | _ -> Alcotest.fail "expected Unsupported_mapper 4"
+  | Error (Ines.Unsupported_mapper 5) -> ()
+  | _ -> Alcotest.fail "expected Unsupported_mapper 5"
+
+let test_mmc3_basic () =
+  (* mapper 4 = MMC3: flags6[7:4]=4 → flags6=0x40 *)
+  let data = make_rom ~flags6:0x40 ~prg_banks:8 ~chr_banks:4 () in
+  match Ines.parse data with
+  | Ok cart ->
+    (match cart.rom with
+     | Cart.MMC3 { prg; chr; chr_is_ram } ->
+       Alcotest.(check int) "PRG = 128KB" (8 * 16 * 1024) (Bytes.length prg);
+       Alcotest.(check int) "CHR = 32KB" (4 * 8 * 1024) (Bytes.length chr);
+       Alcotest.(check bool) "CHR-ROM" false chr_is_ram
+     | _ -> Alcotest.fail "expected MMC3")
+  | Error _ -> Alcotest.fail "parse failed"
+
+let test_mmc3_chr_ram () =
+  let data = make_rom ~flags6:0x40 ~prg_banks:4 ~chr_banks:0 () in
+  match Ines.parse data with
+  | Ok cart ->
+    (match cart.rom with
+     | Cart.MMC3 { chr; chr_is_ram; _ } ->
+       Alcotest.(check int) "CHR-RAM = 8KB" (8 * 1024) (Bytes.length chr);
+       Alcotest.(check bool) "CHR-RAM" true chr_is_ram
+     | _ -> Alcotest.fail "expected MMC3")
+  | Error _ -> Alcotest.fail "parse failed"
 
 (* ------------------------------------------------------------------ *)
 (* テスト登録                                                           *)
@@ -196,6 +220,10 @@ let () =
     ; ( "CNROM (mapper 3)"
       , [ Alcotest.test_case "basic" `Quick test_cnrom_basic
         ; Alcotest.test_case "CHR data preserved" `Quick test_cnrom_chr_data
+        ] )
+    ; ( "MMC3 (mapper 4)"
+      , [ Alcotest.test_case "basic" `Quick test_mmc3_basic
+        ; Alcotest.test_case "CHR-RAM" `Quick test_mmc3_chr_ram
         ] )
     ; ( "エラー系"
       , [ Alcotest.test_case "invalid magic" `Quick test_error_invalid_magic

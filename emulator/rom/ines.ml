@@ -69,6 +69,20 @@ let parse_mmc1 ~ofs ~prg_banks ~chr_banks data =
   in
   Ok (Cartridge.MMC1 { prg; chr; chr_is_ram })
 
+(** MMC3 (mapper #4): 8KB PRG bank + 1/2KB CHR bank + scanline IRQ. *)
+let parse_mmc3 ~ofs ~prg_banks ~chr_banks data =
+  let prg_size = prg_banks * prg_bank_size in
+  let chr_size = chr_banks * chr_bank_size in
+  let* () = need data (ofs + prg_size + chr_size) in
+  let prg = Bytes.sub data ofs prg_size in
+  let chr_is_ram = chr_banks = 0 in
+  let chr =
+    if chr_is_ram
+    then Bytes.create chr_ram_size
+    else Bytes.sub data (ofs + prg_size) chr_size
+  in
+  Ok (Cartridge.MMC3 { prg; chr; chr_is_ram })
+
 (* ------------------------------------------------------------------ *)
 (* 公開エントリポイント                                                 *)
 (* ------------------------------------------------------------------ *)
@@ -101,6 +115,7 @@ let parse (data : bytes) : (Cartridge.t, error) result =
       | 1 -> parse_mmc1 ~ofs ~prg_banks ~chr_banks data
       | 2 -> parse_unrom ~ofs ~prg_banks data
       | 3 -> parse_cnrom ~ofs ~prg_banks ~chr_banks data
+      | 4 -> parse_mmc3 ~ofs ~prg_banks ~chr_banks data
       | n -> Error (Unsupported_mapper n)
     in
     Ok

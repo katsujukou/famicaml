@@ -686,8 +686,11 @@ type frame_counter =
   }
 
 let make_frame_counter () =
+  (* 実機の power-on は IRQ enable (= inhibit=false) だが、$4017 を late に
+     書く ROM (SMB3 等) との互換性のため、起動時は inhibit=true としておく。
+     fceux/Mesen 等の主要エミュも同じ妥協を採用. *)
   { mode = Mode_4_step
-  ; irq_inhibit = false
+  ; irq_inhibit = true
   ; cycle_in_seq = 0
   ; irq_flag = false
   }

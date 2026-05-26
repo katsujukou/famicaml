@@ -541,6 +541,7 @@ let () =
                  { Ppu.chr_read =
                      (fun ofs -> Uint8.of_int (Bytes.get_uint8 chr ofs))
                  ; chr_write = (fun _ _ -> ())
+                 ; a12_rise = (fun () -> ())
                  }
                in
                Ppu.connect_cart ppu ~mirroring:Emulator.Rom.Cartridge.H ~chr_io;
@@ -562,6 +563,7 @@ let () =
                   (fun ofs -> Uint8.of_int (Bytes.get_uint8 chr ofs))
               ; chr_write =
                   (fun ofs v -> Bytes.set_uint8 chr ofs (Uint8.to_int v))
+              ; a12_rise = (fun () -> ())
               }
             in
             Ppu.connect_cart ppu ~mirroring:Emulator.Rom.Cartridge.H ~chr_io;
@@ -579,6 +581,7 @@ let () =
                let chr_io =
                  { Ppu.chr_read = (fun _ -> Uint8.of_int 0x5A)
                  ; chr_write = (fun _ _ -> ())
+                 ; a12_rise = (fun () -> ())
                  }
                in
                Ppu.connect_cart ppu ~mirroring:Emulator.Rom.Cartridge.V ~chr_io;
@@ -623,6 +626,7 @@ let () =
                  { Ppu.chr_read =
                      (fun ofs -> Uint8.of_int (Bytes.get_uint8 chr ofs))
                  ; chr_write = (fun _ _ -> ())
+                 ; a12_rise = (fun () -> ())
                  }
                in
                Ppu.connect_cart ppu ~mirroring:Emulator.Rom.Cartridge.H ~chr_io;
@@ -655,6 +659,7 @@ let () =
                  { Ppu.chr_read =
                      (fun ofs -> Uint8.of_int (Bytes.get_uint8 chr ofs))
                  ; chr_write = (fun _ _ -> ())
+                 ; a12_rise = (fun () -> ())
                  }
                in
                Ppu.connect_cart ppu ~mirroring:Emulator.Rom.Cartridge.H ~chr_io;
@@ -707,6 +712,7 @@ let () =
                  { Ppu.chr_read =
                      (fun ofs -> Uint8.of_int (Bytes.get_uint8 chr ofs))
                  ; chr_write = (fun _ _ -> ())
+                 ; a12_rise = (fun () -> ())
                  }
                in
                Ppu.connect_cart ppu ~mirroring:Emulator.Rom.Cartridge.H ~chr_io;
@@ -738,6 +744,7 @@ let () =
               { Ppu.chr_read =
                   (fun ofs -> Uint8.of_int (Bytes.get_uint8 chr ofs))
               ; chr_write = (fun _ _ -> ())
+              ; a12_rise = (fun () -> ())
               }
             in
             (* Vertical mirror で $2000/$2400 を独立にする *)
@@ -788,6 +795,7 @@ let () =
                  { Ppu.chr_read =
                      (fun ofs -> Uint8.of_int (Bytes.get_uint8 chr ofs))
                  ; chr_write = (fun _ _ -> ())
+                 ; a12_rise = (fun () -> ())
                  }
                in
                Ppu.connect_cart ppu ~mirroring:Emulator.Rom.Cartridge.H ~chr_io;
@@ -818,6 +826,7 @@ let () =
               { Ppu.chr_read =
                   (fun ofs -> Uint8.of_int (Bytes.get_uint8 chr ofs))
               ; chr_write = (fun _ _ -> ())
+              ; a12_rise = (fun () -> ())
               }
             in
             Ppu.connect_cart ppu ~mirroring:Emulator.Rom.Cartridge.H ~chr_io;
@@ -850,6 +859,7 @@ let () =
                  { Ppu.chr_read =
                      (fun ofs -> Uint8.of_int (Bytes.get_uint8 chr ofs))
                  ; chr_write = (fun _ _ -> ())
+                 ; a12_rise = (fun () -> ())
                  }
                in
                Ppu.connect_cart ppu ~mirroring:Emulator.Rom.Cartridge.H ~chr_io;
@@ -910,6 +920,7 @@ let () =
                  { Ppu.chr_read =
                      (fun ofs -> Uint8.of_int (Bytes.get_uint8 chr ofs))
                  ; chr_write = (fun _ _ -> ())
+                 ; a12_rise = (fun () -> ())
                  }
                in
                Ppu.connect_cart ppu ~mirroring:Emulator.Rom.Cartridge.H ~chr_io;
@@ -955,6 +966,7 @@ let () =
                  { Ppu.chr_read =
                      (fun ofs -> Uint8.of_int (Bytes.get_uint8 chr ofs))
                  ; chr_write = (fun _ _ -> ())
+                 ; a12_rise = (fun () -> ())
                  }
                in
                Ppu.connect_cart ppu ~mirroring:Emulator.Rom.Cartridge.H ~chr_io;
@@ -990,6 +1002,7 @@ let () =
               { Ppu.chr_read =
                   (fun ofs -> Uint8.of_int (Bytes.get_uint8 chr ofs))
               ; chr_write = (fun _ _ -> ())
+              ; a12_rise = (fun () -> ())
               }
             in
             Ppu.connect_cart ppu ~mirroring:Emulator.Rom.Cartridge.H ~chr_io;
@@ -1028,6 +1041,7 @@ let () =
                  { Ppu.chr_read =
                      (fun ofs -> Uint8.of_int (Bytes.get_uint8 chr ofs))
                  ; chr_write = (fun _ _ -> ())
+                 ; a12_rise = (fun () -> ())
                  }
                in
                Ppu.connect_cart ppu ~mirroring:Emulator.Rom.Cartridge.H ~chr_io;
@@ -1081,6 +1095,7 @@ let () =
                  { Ppu.chr_read =
                      (fun ofs -> Uint8.of_int (Bytes.get_uint8 chr ofs))
                  ; chr_write = (fun _ _ -> ())
+                 ; a12_rise = (fun () -> ())
                  }
                in
                Ppu.connect_cart ppu ~mirroring:Emulator.Rom.Cartridge.H ~chr_io;
@@ -1112,6 +1127,7 @@ let () =
               { Ppu.chr_read =
                   (fun ofs -> Uint8.of_int (Bytes.get_uint8 chr ofs))
               ; chr_write = (fun _ _ -> ())
+              ; a12_rise = (fun () -> ())
               }
             in
             Ppu.connect_cart ppu ~mirroring:Emulator.Rom.Cartridge.H ~chr_io;
@@ -1136,6 +1152,7 @@ let () =
               { Ppu.chr_read =
                   (fun ofs -> Uint8.of_int (Bytes.get_uint8 chr ofs))
               ; chr_write = (fun _ _ -> ())
+              ; a12_rise = (fun () -> ())
               }
             in
             Ppu.connect_cart ppu ~mirroring:Emulator.Rom.Cartridge.H ~chr_io;

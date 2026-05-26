@@ -1,13 +1,18 @@
 open Famicaml_common.Nesint
 
 (** マッパーの CPU 側 / PPU 側 read/write 関数群。
-    - [read]/[write]: CPU バス $8000-$FFFF (PRG-ROM および bank select レジスタ)
-    - [chr_read]/[chr_write]: PPU バス $0000-$1FFF (pattern table; CHR-ROM/RAM) *)
+    - [read]/[write]: CPU バス $6000-$FFFF (PRG RAM + PRG ROM + bank select)
+    - [chr_read]/[chr_write]: PPU バス $0000-$1FFF (pattern table; CHR-ROM/RAM)
+    - [irq_pending]: MMC3 等の scanline IRQ. NROM 等は常に false.
+    - [on_a12_rise]: PPU が rendering 中 A12 立ち上がり時に呼ぶ. MMC3 は
+      ここで scanline IRQ counter を decrement. NROM 等は no-op. *)
 type mapper_io =
   { read : int -> int
   ; write : int -> int -> unit
   ; chr_read : int -> uint8
   ; chr_write : int -> uint8 -> unit
+  ; irq_pending : unit -> bool
+  ; on_a12_rise : unit -> unit
   }
 
 (** カートリッジが挿さっていない時の状態。Open bus は実機では浮動値だが、 本実装では 0 で代用する。 *)
@@ -16,6 +21,8 @@ let empty_mapper : mapper_io =
   ; write = (fun _ _ -> ())
   ; chr_read = (fun _ -> Uint8.zero)
   ; chr_write = (fun _ _ -> ())
+  ; irq_pending = (fun () -> false)
+  ; on_a12_rise = (fun () -> ())
   }
 
 type t =
@@ -83,12 +90,16 @@ let make_mapper
       ~(set_mirroring : Rom.Cartridge.mirror -> unit)
   : mapper_io
   =
+  let no_irq = fun () -> false in
+  let no_a12 = fun () -> () in
   match cart.rom with
   | Rom.Cartridge.NROM { prg; chr } ->
     { read = (fun a -> if a < 0x8000 then 0 else prg_read_fixed prg a)
     ; write = (fun _ _ -> ())
     ; chr_read = chr_read_fixed chr
     ; chr_write = chr_write_noop
+    ; irq_pending = no_irq
+    ; on_a12_rise = no_a12
     }
   | Rom.Cartridge.CNROM { prg; chr } ->
     let bank_size = 0x2000 in
@@ -101,6 +112,8 @@ let make_mapper
           let off = (!chr_bank * bank_size) + (ofs land 0x1FFF) in
           chr_read_fixed chr off)
     ; chr_write = chr_write_noop
+    ; irq_pending = no_irq
+    ; on_a12_rise = no_a12
     }
   | Rom.Cartridge.UNROM { prg; chr_ram } ->
     let bank_lo = ref 0 in
@@ -111,6 +124,8 @@ let make_mapper
     ; write = (fun a x -> if a >= 0x8000 then bank_lo := x mod n_banks)
     ; chr_read = chr_read_fixed chr_ram
     ; chr_write = chr_write_fixed chr_ram
+    ; irq_pending = no_irq
+    ; on_a12_rise = no_a12
     }
   | Rom.Cartridge.MMC1 { prg; chr; chr_is_ram } ->
     let m = Mapper.Mmc1.create ~prg ~chr ~chr_is_ram ~set_mirroring in
@@ -118,6 +133,17 @@ let make_mapper
     ; write = (fun a x -> Mapper.Mmc1.cpu_write m a x)
     ; chr_read = (fun ofs -> Mapper.Mmc1.chr_read m ofs)
     ; chr_write = (fun ofs v -> Mapper.Mmc1.chr_write m ofs v)
+    ; irq_pending = no_irq
+    ; on_a12_rise = no_a12
+    }
+  | Rom.Cartridge.MMC3 { prg; chr; chr_is_ram } ->
+    let m = Mapper.Mmc3.create ~prg ~chr ~chr_is_ram ~set_mirroring in
+    { read = (fun a -> Mapper.Mmc3.cpu_read m a)
+    ; write = (fun a x -> Mapper.Mmc3.cpu_write m a x)
+    ; chr_read = (fun ofs -> Mapper.Mmc3.chr_read m ofs)
+    ; chr_write = (fun ofs v -> Mapper.Mmc3.chr_write m ofs v)
+    ; irq_pending = (fun () -> Mapper.Mmc3.irq_pending m)
+    ; on_a12_rise = (fun () -> Mapper.Mmc3.on_a12_rise m)
     }
 
 (* ------------------------------------------------------------------ *)
@@ -258,7 +284,11 @@ let connect_cartridge (nes : t) (cart : Rom.Cartridge.t) =
   Ppu.connect_cart
     nes.ppu
     ~mirroring:cart.spec.mirroring
-    ~chr_io:{ Ppu.chr_read = mapper.chr_read; Ppu.chr_write = mapper.chr_write };
+    ~chr_io:
+      { Ppu.chr_read = mapper.chr_read
+      ; Ppu.chr_write = mapper.chr_write
+      ; Ppu.a12_rise = mapper.on_a12_rise
+      };
   refresh_vectors nes
 
 let connect (nes : t) (data : bytes) =
@@ -352,9 +382,14 @@ let tick (nes : t) : unit =
         Ppu.step nes.ppu;
         Ppu.step nes.ppu
       done);
-    (* Frame counter / DMC IRQ は level-triggered (実機通り). CPU の I フラグが
-       立っていればブロックされる. Cpu.request_irq は次の命令境界でサービス. *)
-    if Apu.irq_pending nes.apu then Cpu.request_irq nes.cpu
+    (* Frame counter / DMC / Mapper (MMC3 等) IRQ は level-triggered.
+       CPU の I フラグが立っていればブロックされる. *)
+    (* Frame counter / DMC / Mapper (MMC3 等) IRQ は level-triggered.
+       CPU の I フラグが立っていればブロックされる. *)
+    (* Frame counter / DMC / Mapper (MMC3 等) IRQ は level-triggered.
+       CPU の I フラグが立っていればブロックされる. *)
+    if Apu.irq_pending nes.apu || nes.mapper.irq_pending ()
+    then Cpu.request_irq nes.cpu
 
 (** 次の vblank 開始 (= 1 フレーム完了) まで tick し続ける。 *)
 let run_until_frame (nes : t) : unit =

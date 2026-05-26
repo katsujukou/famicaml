@@ -19,11 +19,18 @@ module Palette = Palette
 type chr_io =
   { chr_read : int -> uint8
   ; chr_write : int -> uint8 -> unit
+  ; a12_rise : unit -> unit
+    (** PPU rendering 中の A12 (= PPU bus address bit 12) 立ち上がりを
+        mapper に通知するコールバック. MMC3 の scanline IRQ counter は
+        これで decrement される. NROM 等は no-op. *)
   }
 
-(** カートリッジ未接続時の CHR バス。read は 0、write は捨てる。 *)
+(** カートリッジ未接続時の CHR バス. read=0, write=捨て, a12_rise=no-op. *)
 let empty_chr_io : chr_io =
-  { chr_read = (fun _ -> Uint8.zero); chr_write = (fun _ _ -> ()) }
+  { chr_read = (fun _ -> Uint8.zero)
+  ; chr_write = (fun _ _ -> ())
+  ; a12_rise = (fun () -> ())
+  }
 
 (* ------------------------------------------------------------------ *)
 (* Ppu.t — PPU 本体の状態                                              *)
@@ -852,4 +859,13 @@ let step (ppu : t) : unit =
   if ppu.scanline = 261 && ppu.dot = 1
   then
     ppu.status
-    <- { vblank_flag = false; sprite_0_hit = false; sprite_overflow = false }
+    <- { vblank_flag = false; sprite_0_hit = false; sprite_overflow = false };
+  (* MMC3 等の scanline IRQ 用 A12 立ち上がり通知. 実機の細かい挙動は
+     pattern fetch ごとの A12 transition だが、本実装はシンプル化して
+     visible/pre-render scanline の sprite fetch タイミング (= dot 260) で
+     1 回発火. rendering disabled なら抑制する. *)
+  if
+    (ppu.mask.enable_bg || ppu.mask.enable_sprite)
+    && (ppu.scanline < 240 || ppu.scanline = 261)
+    && ppu.dot = 260
+  then ppu.chr_io.a12_rise ()

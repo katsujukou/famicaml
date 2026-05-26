@@ -44,6 +44,7 @@ let rom_summary = function
     ("UNROM", Bytes.length prg, Bytes.length chr_ram)
   | Cart.CNROM { prg; chr } -> ("CNROM", Bytes.length prg, Bytes.length chr)
   | Cart.MMC1 { prg; chr; _ } -> ("MMC1", Bytes.length prg, Bytes.length chr)
+  | Cart.MMC3 { prg; chr; _ } -> ("MMC3", Bytes.length prg, Bytes.length chr)
 
 (* ------------------------------------------------------------------ *)
 (* グローバル NES インスタンス                                          *)

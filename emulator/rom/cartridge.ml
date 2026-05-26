@@ -28,6 +28,13 @@ type rom_spec =
       ; chr : Bytes.t
       ; chr_is_ram : bool
       } (** Mapper 1: shift register 経由で PRG/CHR バンク切替 + 動的 mirroring。 *)
+  | MMC3 of
+      { prg : Bytes.t
+      ; chr : Bytes.t
+      ; chr_is_ram : bool
+      }
+  (** Mapper 4: 8KB PRG bank × 2 + fixed last/2nd-last, 1/2KB CHR bank,
+            動的 H/V mirroring, scanline IRQ. *)
 
 type t =
   { spec : cart_spec
@@ -40,3 +47,4 @@ let chr_bytes cart =
   | UNROM { chr_ram; _ } -> chr_ram
   | CNROM { chr; _ } -> chr
   | MMC1 { chr; _ } -> chr
+  | MMC3 { chr; _ } -> chr

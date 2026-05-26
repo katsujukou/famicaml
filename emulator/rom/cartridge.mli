@@ -30,6 +30,13 @@ type rom_spec =
       }
   (** Mapper 1: shift register 経由で PRG/CHR バンク切替 + 動的 mirroring。
             CHR は ROM または RAM (chr_is_ram で区別)。 *)
+  | MMC3 of
+      { prg : Bytes.t
+      ; chr : Bytes.t
+      ; chr_is_ram : bool
+      }
+  (** Mapper 4: 8KB PRG bank × 2 + 固定 last/2nd-last、
+      1/2KB CHR bank、動的 H/V mirroring、scanline IRQ. *)
 
 type t =
   { spec : cart_spec
