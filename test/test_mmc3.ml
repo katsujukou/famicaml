@@ -134,7 +134,8 @@ let test_prg_ram () =
   Alcotest.(check int) "write protected" 0x77 (M.cpu_read m 0x6000);
   (* disable *)
   M.cpu_write m 0xA001 0x00;
-  Alcotest.(check int) "disabled returns 0" 0 (M.cpu_read m 0x6000)
+  (* PRG-RAM disabled → open bus 近似 (アドレス上位 byte) を返す *)
+  Alcotest.(check int) "disabled returns addr high" 0x60 (M.cpu_read m 0x6000)
 
 (* ------------------------------------------------------------------ *)
 (* IRQ                                                                  *)

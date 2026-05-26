@@ -357,7 +357,7 @@ let tick (nes : t) : unit =
     then (
       nes.ppu.nmi_request <- false;
       Cpu.request_nmi nes.cpu);
-    if Apu.irq_pending nes.apu then Cpu.request_irq nes.cpu
+    nes.cpu.irq_pending <- Apu.irq_pending nes.apu || nes.mapper.irq_pending ()
   | None ->
     Cpu.tick nes.memory_bus nes.cpu;
     Apu.tick_cpu nes.apu;
@@ -387,9 +387,12 @@ let tick (nes : t) : unit =
     (* Frame counter / DMC / Mapper (MMC3 等) IRQ は level-triggered.
        CPU の I フラグが立っていればブロックされる. *)
     (* Frame counter / DMC / Mapper (MMC3 等) IRQ は level-triggered.
-       CPU の I フラグが立っていればブロックされる. *)
-    if Apu.irq_pending nes.apu || nes.mapper.irq_pending ()
-    then Cpu.request_irq nes.cpu
+       実機の IRQ 線は source が assert している間ずっと low. source が
+       deassert すれば line も high に戻る. ここで CPU の irq_pending を
+       毎 cycle 同期する (set だけでなく clear も). edge-triggered だと
+       APU が flag を clear した後も CPU に stale な pending が残り、
+       後の CLI で誤発火する (SMB3 で観測). *)
+    nes.cpu.irq_pending <- Apu.irq_pending nes.apu || nes.mapper.irq_pending ()
 
 (** 次の vblank 開始 (= 1 フレーム完了) まで tick し続ける。 *)
 let run_until_frame (nes : t) : unit =
