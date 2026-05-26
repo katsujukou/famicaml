@@ -35,12 +35,15 @@ let uint8array_of_bytes (b : bytes) : Typed_array.uint8Array Js.t =
 let mirror_to_string = function
   | Cart.H -> "horizontal"
   | Cart.V -> "vertical"
+  | Cart.One_screen_lo -> "one-screen-lo"
+  | Cart.One_screen_hi -> "one-screen-hi"
 
 let rom_summary = function
   | Cart.NROM { prg; chr } -> ("NROM", Bytes.length prg, Bytes.length chr)
   | Cart.UNROM { prg; chr_ram } ->
     ("UNROM", Bytes.length prg, Bytes.length chr_ram)
   | Cart.CNROM { prg; chr } -> ("CNROM", Bytes.length prg, Bytes.length chr)
+  | Cart.MMC1 { prg; chr; _ } -> ("MMC1", Bytes.length prg, Bytes.length chr)
 
 (* ------------------------------------------------------------------ *)
 (* グローバル NES インスタンス                                          *)
@@ -162,6 +165,29 @@ let set_viewer_sub_slot (slot : int) (master_idx : int) =
 let get_framebuffer () = uint8array_of_bytes nes.ppu.framebuffer
 
 (* ------------------------------------------------------------------ *)
+(* Audio output                                                         *)
+(*                                                                     *)
+(* AudioContext.sampleRate を渡して downsample 比率を更新し、毎フレーム  *)
+(* drain_audio_samples で蓄積サンプルを Float32Array で取り出す.       *)
+(* ------------------------------------------------------------------ *)
+
+(* JS の number は wasm_of_ocaml では Js.number_t として渡ってくるので
+   明示的に float へ変換する必要がある (= 自動変換は無い). *)
+let set_audio_sample_rate (rate : Js.number_t) : unit =
+  Emulator.Apu.set_sample_rate nes.apu (Js.float_of_number rate)
+
+(** APU の ring buffer から最大 [max_n] サンプルを取り出して Float32Array に
+    詰めて返す. 値域は概ね [0.0, 0.3] (実機 mixer の non-linear 出力). *)
+let drain_audio_samples (max_n : int) : Typed_array.float32Array Js.t =
+  let arr = Emulator.Apu.drain_samples nes.apu max_n in
+  let n = Array.length arr in
+  let ja = new%js Typed_array.float32Array n in
+  for i = 0 to n - 1 do
+    Typed_array.set ja i (Js.number_of_float arr.(i))
+  done;
+  ja
+
+(* ------------------------------------------------------------------ *)
 (* Controller                                                           *)
 (*                                                                     *)
 (* JS 側からは player (0 = P1, 1 = P2) と button (0..7) を渡す.        *)
@@ -245,6 +271,8 @@ let () =
        val runFrame = Js.wrap_callback run_frame_safe
        val tick = Js.wrap_callback tick_safe
        val getFramebuffer = Js.wrap_callback get_framebuffer
+       val setAudioSampleRate = Js.wrap_callback set_audio_sample_rate
+       val drainAudioSamples = Js.wrap_callback drain_audio_samples
 
        val setButton =
          Js.wrap_callback (fun player button pressed ->

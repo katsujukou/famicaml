@@ -10,6 +10,7 @@ type t =
   ; mutable mapper : mapper_io
   ; cpu : Cpu.t (** Per-cycle 6502 CPU. *)
   ; ppu : Ppu.t
+  ; apu : Apu.t
   ; controller1 : Controller.t (** P1 標準コントローラ ($4016). *)
   ; controller2 : Controller.t (** P2 標準コントローラ ($4017 read). *)
   ; memory_bus : Bus.t

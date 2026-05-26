@@ -127,6 +127,11 @@ let disconnect_cart (ppu : t) : unit =
   ppu.mirroring <- Rom.Cartridge.H;
   ppu.chr_io <- empty_chr_io
 
+(** Mirroring を動的に変更する. MMC1 等の bank-switching mapper が
+    control register write 時に呼ぶ. *)
+let set_mirroring (ppu : t) (m : Rom.Cartridge.mirror) : unit =
+  ppu.mirroring <- m
+
 (* ------------------------------------------------------------------ *)
 (* Master palette アクセス (UI 連携用)                                  *)
 (* ------------------------------------------------------------------ *)
@@ -161,8 +166,10 @@ let set_master_color (ppu : t) (idx : int) ~(r : int) ~(g : int) ~(b : int)
 (** Nametable $2000-$2FFF のアドレスを物理 vram (2KB) のオフセットに
     変換する。$3000-$3EFF は呼び出し側で $2000-$2EFF にミラー済み前提.
 
-    Vertical mirror: 左右並び(0,1,0,1) → 上下がミラー
-    Horizontal mirror: 上下並び(0,0,1,1) → 左右がミラー *)
+    - Vertical mirror: 左右並び(0,1,0,1) → 上下がミラー
+    - Horizontal mirror: 上下並び(0,0,1,1) → 左右がミラー
+    - One_screen_lo: 全 NT が vram bank 0 ($0000-$03FF)
+    - One_screen_hi: 全 NT が vram bank 1 ($0400-$07FF) *)
 let nt_offset ~(mirroring : Rom.Cartridge.mirror) (addr : int) : int =
   let a = addr land 0x0FFF in
   let nt = a lsr 10 in
@@ -171,6 +178,8 @@ let nt_offset ~(mirroring : Rom.Cartridge.mirror) (addr : int) : int =
     match mirroring with
     | Rom.Cartridge.V -> nt land 1
     | Rom.Cartridge.H -> nt lsr 1
+    | Rom.Cartridge.One_screen_lo -> 0
+    | Rom.Cartridge.One_screen_hi -> 1
   in
   (bank * 0x0400) + ofs
 

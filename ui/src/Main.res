@@ -42,6 +42,35 @@ external windowAddBlurListener: (string, unit => unit) => unit = "addEventListen
 @val @scope("window")
 external windowRemoveBlurListener: (string, unit => unit) => unit = "removeEventListener"
 
+/* ---- Web Audio (AudioContext + AudioWorklet) ---- */
+
+type audioContext
+type audioDestination
+type audioWorklet
+type audioWorkletNode
+type messagePort
+type float32Array
+
+@new external newAudioContext: unit => audioContext = "AudioContext"
+@get external audioContextSampleRate: audioContext => float = "sampleRate"
+@get external audioContextDestination: audioContext => audioDestination = "destination"
+@get external audioContextWorklet: audioContext => audioWorklet = "audioWorklet"
+@get external audioContextState: audioContext => string = "state"
+@send external audioContextResume: audioContext => promise<unit> = "resume"
+@send external audioContextSuspend: audioContext => promise<unit> = "suspend"
+
+@send
+external audioWorkletAddModule: (audioWorklet, string) => promise<unit> = "addModule"
+
+@new
+external newAudioWorkletNode: (audioContext, string) => audioWorkletNode = "AudioWorkletNode"
+
+@send
+external audioWorkletNodeConnect: (audioWorkletNode, audioDestination) => unit = "connect"
+
+@get external audioWorkletNodePort: audioWorkletNode => messagePort = "port"
+@send external messagePortPostMessage: (messagePort, float32Array) => unit = "postMessage"
+
 @get external targetFiles: {..} => Nullable.t<fileList> = "files"
 
 /* ---- Canvas / ImageData バインディング ---- */
@@ -130,6 +159,8 @@ type famiCamlApi = {
   runFrame: unit => unit,
   tick: unit => unit,
   getFramebuffer: unit => uint8Array,
+  setAudioSampleRate: float => unit,
+  drainAudioSamples: int => float32Array,
   setButton: (int, int, bool) => unit,
   releaseAllButtons: unit => unit,
 }
@@ -342,6 +373,11 @@ module App = {
     let (running, setRunning) = React.useState(() => false)
     let (fps, setFps) = React.useState(() => 0.0)
     let runningRef = React.useRef(false)
+    /* Audio: AudioContext + AudioWorklet は user gesture (= 初回 Power ON) が
+       必要なので lazy 初期化. None = まだ作っていない. */
+    let audioCtxRef = React.useRef((None: option<audioContext>))
+    let audioNodeRef = React.useRef((None: option<audioWorkletNode>))
+    let audioReadyRef = React.useRef(false)
     let rafIdRef = React.useRef(None)
     let lastFrameTimeRef = React.useRef(0.0)
     let frameCountRef = React.useRef(0)
@@ -409,6 +445,16 @@ module App = {
           try {
             api.runFrame()
             renderNesFrame(canvasNes)
+            /* Audio: 蓄積されたサンプルを worklet に流し込む.
+               1 frame ≒ 735 samples @ 44.1kHz (or 800 @ 48kHz). 余裕を持って 4096 まで取る. */
+            if audioReadyRef.current {
+              switch audioNodeRef.current {
+              | Some(node) =>
+                let samples = api.drainAudioSamples(4096)
+                messagePortPostMessage(audioWorkletNodePort(node), samples)
+              | None => ()
+              }
+            }
             let now = performanceNow()
             /* 初回 (lastFrameTimeRef = 0) はスキップ. それ以外は delta から
                瞬間 FPS を出して EMA で平滑化. */
@@ -473,13 +519,47 @@ module App = {
     | None => false
     }
 
+    /* AudioContext + AudioWorklet を lazy 初期化 (user gesture 必要なので
+       Power ON 押下時に呼ぶ). 初回成功で audioReadyRef.current = true. */
+    let ensureAudio = api =>
+      switch audioCtxRef.current {
+      | Some(ctx) =>
+        /* 既に作成済み. suspend されてたら resume. */
+        let _ = audioContextResume(ctx)
+        ()
+      | None =>
+        let ctx = newAudioContext()
+        audioCtxRef.current = Some(ctx)
+        api.setAudioSampleRate(audioContextSampleRate(ctx))
+        audioWorkletAddModule(audioContextWorklet(ctx), "/famicaml-audio-processor.js")
+        ->Promise.thenResolve(() => {
+          let node = newAudioWorkletNode(ctx, "famicaml-audio")
+          audioWorkletNodeConnect(node, audioContextDestination(ctx))
+          audioNodeRef.current = Some(node)
+          audioReadyRef.current = true
+        })
+        ->Promise.catch(err => {
+          Console.error2("AudioWorklet init failed:", err)
+          Promise.resolve()
+        })
+        ->ignore
+      }
+
     let togglePower = _ =>
       switch Nullable.toOption(famiCaml) {
       | Some(api) =>
         if powerOn {
           stopRun()
           api.powerOff()
+          /* AudioContext は破棄しない (再開時に reuse). suspend で音だけ止める. */
+          switch audioCtxRef.current {
+          | Some(ctx) =>
+            let _ = audioContextSuspend(ctx)
+            ()
+          | None => ()
+          }
         } else {
+          ensureAudio(api)
           api.powerOn()
         }
         setState(_ => Some(api.state()))
@@ -496,7 +576,9 @@ module App = {
       if r.ok {
         setLastError(_ => None)
         /* 読み込み成功 → 自動 Power ON + Run 開始. デバッグで止めたい時は
-           Stop ボタンで一時停止できる. */
+           Stop ボタンで一時停止できる. ファイル選択は user gesture なので
+           AudioContext 初期化 OK. */
+        ensureAudio(api)
         api.powerOn()
         setState(_ => Some(api.state()))
         startRun()
