@@ -30,6 +30,10 @@ val cpu_write : t -> uint16 -> uint8 -> unit
     CPU は毎 cycle これを見て、I フラグが 0 なら IRQ シーケンスを開始する. *)
 val irq_pending : t -> bool
 
+(** Soft reset. $4015=0 で全 channel 沈黙、DMC IRQ flag clear、frame counter
+    IRQ clear + cycle reset. frame counter mode/inhibit は preserved. *)
+val reset : t -> unit
+
 (** {1 Audio output (Phase D1B)}
 
     APU は per-CPU-cycle で実機の non-linear mixer 出力を計算し、

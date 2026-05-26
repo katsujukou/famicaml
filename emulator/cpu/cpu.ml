@@ -1003,10 +1003,15 @@ let tick (bus : Bus.t) (cpu : t) : unit =
   (* IRQ sampling: penultimate-cycle polling を 2 段 latch でモデル化.
      dispatch は latch_b を使う (= 2 cycle 前の "irq_pending && !I" 状態).
      これで CLI/SEI 直後の 1 命令分の delay が再現される (実機通り).
-     NMI は edge-triggered で CLI/SEI 影響を受けないため即時 dispatch のまま. *)
-  let irq_now = cpu.irq_pending && not (PS.get_flag PS.I cpu.reg_P) in
-  cpu.irq_latch_b <- cpu.irq_latch_a;
-  cpu.irq_latch_a <- irq_now;
+     NMI は edge-triggered で CLI/SEI 影響を受けないため即時 dispatch のまま.
+     最適化: irq_pending も latch も全 false なら state 変化なし → skip. *)
+  if cpu.irq_pending || cpu.irq_latch_a || cpu.irq_latch_b
+  then (
+    let irq_now =
+      cpu.irq_pending && not (PS.get_flag PS.I cpu.reg_P)
+    in
+    cpu.irq_latch_b <- cpu.irq_latch_a;
+    cpu.irq_latch_a <- irq_now);
   cpu.cycles <- cpu.cycles + 1
 
 let step_instruction (bus : Bus.t) (cpu : t) : int =

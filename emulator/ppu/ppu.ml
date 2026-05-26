@@ -196,6 +196,44 @@ let disconnect_cart (ppu : t) : unit =
   ppu.mirroring <- Rom.Cartridge.H;
   ppu.chr_io <- empty_chr_io
 
+(** Soft reset (RESET ボタン). NESdev 仕様 + Mesen 互換アプローチ:
+    - $2000 (ctrl) = $00, $2001 (mask) = $00, OAMADDR = 0
+    - $2007 read buffer = 0, PPUSCROLL/$2006 write toggle w = 0
+    - vblank flag clear, NMI request clear
+    - v/t/x = 0, scanline/dot/frame counter = 0 (= フレーム頭から再開)
+    保持: vram, palette_ram, oam, framebuffer, mirroring, chr_io.
+    ※ 厳密な実機 soft reset では PPU は止まらず scanline/dot は走り続けるが、
+    Mesen 互換 + demo.nes 等の挙動安定のため frame counter も 0 に. *)
+let reset (ppu : t) : unit =
+  ppu.ctrl <- Register.Ppu_control.initial ();
+  ppu.mask <- Register.Ppu_mask.initial ();
+  ppu.status <- { vblank_flag = false; sprite_0_hit = false; sprite_overflow = false };
+  ppu.oam_addr <- Uint8.zero;
+  ppu.read_buffer <- Uint8.zero;
+  ppu.internal.v <- Uint16.zero;
+  ppu.internal.t <- Uint16.zero;
+  ppu.internal.x <- Uint8.zero;
+  ppu.internal.w <- false;
+  ppu.dot <- 0;
+  ppu.scanline <- 0;
+  ppu.frame <- 0;
+  ppu.nmi_request <- false;
+  ppu.frame_complete <- false;
+  ppu.palette_cache_dirty <- true;
+  ppu.sprite_count <- 0;
+  Array.fill ppu.sprite_line_color 0 256 (-1);
+  (* BG fetch pipeline state も clear *)
+  ppu.nt_latch <- 0;
+  ppu.at_latch <- 0;
+  ppu.pt_lo_latch <- 0;
+  ppu.pt_hi_latch <- 0;
+  ppu.bg_shift_lo <- 0;
+  ppu.bg_shift_hi <- 0;
+  ppu.at_shift_lo <- 0;
+  ppu.at_shift_hi <- 0;
+  ppu.at_next_lo <- 0;
+  ppu.at_next_hi <- 0
+
 (** Mirroring を動的に変更する. MMC1 等の bank-switching mapper が
     control register write 時に呼ぶ. *)
 let set_mirroring (ppu : t) (m : Rom.Cartridge.mirror) : unit =
@@ -1262,14 +1300,16 @@ let render_sprites (ppu : t) : unit =
     Visible/pre-render scanline では BG fetch pipeline + DrawPixel を回す.
     Sprite renderer は当面 per-frame (vblank で render_sprites を呼ぶ). *)
 let step (ppu : t) : unit =
-  (* (1) dot/scanline 進行
-     NTSC PPU の odd-frame skip: pre-render scanline (261) の dot 339 から
-     次フレーム (0,0) に直接ジャンプ (dot 340 をスキップ). rendering 有効時のみ.
-     これにより 2-frame 平均が 89341.5 dot = 正確な NTSC frame rate. 未実装だと
-     CPU との位相が徐々にずれ、MMC3 IRQ split 位置がフレーム間で揺らぐ. *)
-  let rendering_now = ppu.mask.enable_bg || ppu.mask.enable_sprite in
-  let odd_frame = ppu.frame land 1 = 1 in
-  if ppu.scanline = 261 && ppu.dot = 339 && rendering_now && odd_frame
+  (* rendering_enabled を 1 回だけ計算 *)
+  let mask = ppu.mask in
+  let rendering = mask.enable_bg || mask.enable_sprite in
+  (* (1) dot/scanline 進行. NTSC odd-frame skip: rendering 有効な奇数 frame で
+     pre-render scanline (261) dot 339 から次 frame (0,0) へ直接ジャンプ. *)
+  if
+    ppu.scanline = 261
+    && ppu.dot = 339
+    && rendering
+    && ppu.frame land 1 = 1
   then (
     ppu.dot <- 0;
     ppu.scanline <- 0;
@@ -1288,49 +1328,38 @@ let step (ppu : t) : unit =
         ppu.frame <- ppu.frame + 1)));
   let sl = ppu.scanline in
   let d = ppu.dot in
-  let rendering_enabled = ppu.mask.enable_bg || ppu.mask.enable_sprite in
-  (* (2) フレーム開始: scanline 0 dot 0 で bg_mask クリア *)
-  if sl = 0 && d = 0 then clear_bg_mask ppu;
-  (* (3) Visible scanline (0..239): draw + fetch pipeline *)
-  if sl < 240 && rendering_enabled
+  (* (2) Scanline-type dispatch (mutually exclusive で branch を減らす) *)
+  if sl < 240
   then (
-    (* dot 0 で sprite line を一気に解決. 以降 dot は配列 lookup のみ. *)
-    if d = 0 then resolve_sprite_line ppu;
-    if d >= 1 && d <= 256
+    (* Visible scanline *)
+    if sl = 0 && d = 0 then clear_bg_mask ppu;
+    if rendering
     then (
-      draw_bg_pixel ppu;
-      draw_sprite_pixel ppu);
-    bg_fetch_at_dot ppu);
-  (* (3.5) Sprite eval for NEXT scanline. dot 257 で実行 (実機 dot 257-320 の代表). *)
-  if d = 257 && rendering_enabled
-  then
-    if sl < 239
-    then evaluate_sprites_for ppu ~next_sl:(sl + 1)
-    else if sl = 261
-    then evaluate_sprites_for ppu ~next_sl:0;
-  (* (4) Pre-render scanline (261): fetch pipeline + vertical copy *)
-  if sl = 261 && rendering_enabled
+      if d = 0 then resolve_sprite_line ppu;
+      if d >= 1 && d <= 256
+      then (
+        draw_bg_pixel ppu;
+        draw_sprite_pixel ppu);
+      bg_fetch_at_dot ppu;
+      if d = 257 && sl < 239 then evaluate_sprites_for ppu ~next_sl:(sl + 1);
+      if d = 260 then ppu.chr_io.a12_rise ()))
+  else if sl = 241
   then (
-    bg_fetch_at_dot ppu;
-    pre_render_vertical_copy ppu);
-  (* (5) Vblank 突入 (scanline 241 dot 1) *)
-  if sl = 241 && d = 1
+    if d = 1
+    then (
+      ppu.status <- { ppu.status with vblank_flag = true };
+      if ppu.ctrl.enable_nmi then ppu.nmi_request <- true;
+      ppu.frame_complete <- true))
+  else if sl = 261
   then (
-    ppu.status <- { ppu.status with vblank_flag = true };
-    if ppu.ctrl.enable_nmi then ppu.nmi_request <- true;
-    ppu.frame_complete <- true);
-  (* (6) Pre-render 開始でフラグクリア *)
-  if sl = 261 && d = 1
-  then
-    ppu.status
-    <- { vblank_flag = false; sprite_0_hit = false; sprite_overflow = false };
-  (* MMC3 A12 rise 通知. 簡易: dot 260 で 1 回.
-     dot-accurate な A12 transition tracking は sprite fetch を dot 257-320 に
-     分散する必要があり (現状は dot 257 で 8 sprite 一括 fetch)、未実装.
-     SMB3 等は per-scanline で 1 rise 期待してるので、現状の simplification で
-     正しく動作する. *)
-  if
-    (ppu.mask.enable_bg || ppu.mask.enable_sprite)
-    && (sl < 240 || sl = 261)
-    && d = 260
-  then ppu.chr_io.a12_rise ()
+    (* Pre-render *)
+    if d = 1
+    then
+      ppu.status
+      <- { vblank_flag = false; sprite_0_hit = false; sprite_overflow = false };
+    if rendering
+    then (
+      bg_fetch_at_dot ppu;
+      pre_render_vertical_copy ppu;
+      if d = 257 then evaluate_sprites_for ppu ~next_sl:0;
+      if d = 260 then ppu.chr_io.a12_rise ()))

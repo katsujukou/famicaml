@@ -51,3 +51,7 @@ val chr_read : t -> int -> Famicaml_common.Nesint.uint8
 
 (** PPU bus への write. CHR-RAM のみ有効、CHR-ROM では無視. *)
 val chr_write : t -> int -> Famicaml_common.Nesint.uint8 -> unit
+
+(** Soft reset (= write $80 to $8000 と同等). shift register + control を
+    起動時状態 (PRG mode 3) に戻す. CHR/PRG bank は保持. *)
+val reset : t -> unit

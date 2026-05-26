@@ -45,3 +45,6 @@ val on_a12_rise : t -> unit
 
 (** IRQ pin が low (= active) かどうか. level-triggered. *)
 val irq_pending : t -> bool
+
+(** Soft reset. IRQ enable/flag を off に. *)
+val reset : t -> unit

@@ -221,3 +221,9 @@ let on_a12_rise t =
   if t.irq_counter = 0 && t.irq_enable then t.irq_flag <- true
 
 let irq_pending t = t.irq_flag
+
+(** Soft reset. IRQ を完全に off (enable=false, flag=false). counter/latch は
+    保持. 実機の MMC3 reset 詳細は非公式だが、IRQ disable は妥当な振る舞い. *)
+let reset t =
+  t.irq_enable <- false;
+  t.irq_flag <- false

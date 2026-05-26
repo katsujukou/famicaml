@@ -1014,6 +1014,24 @@ let tick_cpu (apu : t) : unit =
 let irq_pending (apu : t) : bool =
   apu.frame_counter.irq_flag || apu.dmc.irq_flag
 
+(** Soft reset (RESET ボタン). NESdev 仕様:
+    - $4015 = 0: 全 channel disable + 各 length counter = 0
+    - DMC: 停止 + IRQ flag clear
+    - Frame counter: mode/inhibit は preserved だが IRQ flag clear、cycle reset *)
+let reset (apu : t) : unit =
+  apu.pulse1.enabled <- false;
+  apu.pulse1.length_counter <- 0;
+  apu.pulse2.enabled <- false;
+  apu.pulse2.length_counter <- 0;
+  apu.triangle.enabled <- false;
+  apu.triangle.length_counter <- 0;
+  apu.noise.enabled <- false;
+  apu.noise.length_counter <- 0;
+  apu.dmc.bytes_remaining <- 0;
+  apu.dmc.irq_flag <- false;
+  apu.frame_counter.irq_flag <- false;
+  apu.frame_counter.cycle_in_seq <- 0
+
 (* DMC bus reader inject と pending stall 取り出し. Apu.t 経由のラッパ. *)
 let connect_bus_reader (apu : t) (f : bus_reader) : unit =
   dmc_connect_bus_reader apu.dmc f

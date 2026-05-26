@@ -490,7 +490,11 @@ module App = {
             if mod(frameCountRef.current, 15) == 0 {
               setFps(_ => fpsEmaRef.current)
             }
-            setState(_ => Some(api.state()))
+            /* setState は React 再レンダー + Pattern Tables 再描画を triggers
+               するので毎フレームは重い. 4 フレーム (= 15Hz) ごとに throttle. */
+            if mod(frameCountRef.current, 4) == 0 {
+              setState(_ => Some(api.state()))
+            }
           } catch {
           | exn =>
             Console.error2("emulator threw, stopping run loop:", exn)

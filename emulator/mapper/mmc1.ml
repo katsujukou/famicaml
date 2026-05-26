@@ -61,6 +61,9 @@ let reset_shift t =
   t.control <- t.control lor 0x0C;
   apply_control t
 
+(** Soft reset. shift register + control を起動時状態 (PRG mode 3) へ. *)
+let reset t = reset_shift t
+
 (** 5 回目の write で確定した value を target register に書き込む.
     target は最後の write address の bits 14-13 で決定. *)
 let apply_register t addr value =
