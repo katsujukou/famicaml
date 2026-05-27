@@ -196,33 +196,33 @@ let disconnect_cart (ppu : t) : unit =
   ppu.mirroring <- Rom.Cartridge.H;
   ppu.chr_io <- empty_chr_io
 
-(** Soft reset (RESET ボタン). NESdev 仕様 + Mesen 互換アプローチ:
-    - $2000 (ctrl) = $00, $2001 (mask) = $00, OAMADDR = 0
-    - $2007 read buffer = 0, PPUSCROLL/$2006 write toggle w = 0
-    - vblank flag clear, NMI request clear
-    - v/t/x = 0, scanline/dot/frame counter = 0 (= フレーム頭から再開)
-    保持: vram, palette_ram, oam, framebuffer, mirroring, chr_io.
-    ※ 厳密な実機 soft reset では PPU は止まらず scanline/dot は走り続けるが、
-    Mesen 互換 + demo.nes 等の挙動安定のため frame counter も 0 に. *)
+(** Soft reset (RESET ボタン). NESdev / Mesen 準拠. clear する state:
+    - $2000 (ctrl) = $00, $2001 (mask) = $00
+    - OAMADDR = 0, $2007 read buffer = 0
+    - PPUSCROLL/$2006 write toggle w = 0, t (temp VRAM addr) = 0, x (fine X) = 0
+    - NMI request / frame_complete clear
+    - BG fetch pipeline state, sprite eval cache clear (= 描画開始時に再構築)
+    - palette cache dirty 化
+    保持 (実機 spec):
+    - v (current VRAM addr) — Mesen も clear せず ("unchanged by reset")
+    - status (vblank flag, sprite 0 hit, sprite overflow) — VBL flag は
+      "random at power, unchanged by reset"
+    - scanline / dot / frame counter — PPU は CPU RESET で止まらず走り続ける
+    - vram, palette_ram, oam, framebuffer, mirroring, chr_io. *)
 let reset (ppu : t) : unit =
   ppu.ctrl <- Register.Ppu_control.initial ();
   ppu.mask <- Register.Ppu_mask.initial ();
-  ppu.status <- { vblank_flag = false; sprite_0_hit = false; sprite_overflow = false };
   ppu.oam_addr <- Uint8.zero;
   ppu.read_buffer <- Uint8.zero;
-  ppu.internal.v <- Uint16.zero;
   ppu.internal.t <- Uint16.zero;
   ppu.internal.x <- Uint8.zero;
   ppu.internal.w <- false;
-  ppu.dot <- 0;
-  ppu.scanline <- 0;
-  ppu.frame <- 0;
   ppu.nmi_request <- false;
   ppu.frame_complete <- false;
   ppu.palette_cache_dirty <- true;
   ppu.sprite_count <- 0;
   Array.fill ppu.sprite_line_color 0 256 (-1);
-  (* BG fetch pipeline state も clear *)
+  (* BG fetch pipeline state clear *)
   ppu.nt_latch <- 0;
   ppu.at_latch <- 0;
   ppu.pt_lo_latch <- 0;

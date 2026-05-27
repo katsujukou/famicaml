@@ -222,8 +222,7 @@ let on_a12_rise t =
 
 let irq_pending t = t.irq_flag
 
-(** Soft reset. IRQ を完全に off (enable=false, flag=false). counter/latch は
-    保持. 実機の MMC3 reset 詳細は非公式だが、IRQ disable は妥当な振る舞い. *)
-let reset t =
-  t.irq_enable <- false;
-  t.irq_flag <- false
+(** Soft reset. NESdev / Mesen 準拠: MMC3 soft reset は no-op.
+    IRQ enable/flag、counter、PRG/CHR bank、mirroring は CPU RESET 信号で
+    影響を受けない. ゲーム自身が $E000 等で制御. *)
+let reset (_t : t) : unit = ()

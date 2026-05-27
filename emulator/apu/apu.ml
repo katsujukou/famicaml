@@ -1014,21 +1014,25 @@ let tick_cpu (apu : t) : unit =
 let irq_pending (apu : t) : bool =
   apu.frame_counter.irq_flag || apu.dmc.irq_flag
 
-(** Soft reset (RESET ボタン). NESdev 仕様:
-    - $4015 = 0: 全 channel disable + 各 length counter = 0
-    - DMC: 停止 + IRQ flag clear
-    - Frame counter: mode/inhibit は preserved だが IRQ flag clear、cycle reset *)
+(** Soft reset. NESdev / Mesen 準拠:
+    - 各 channel の enabled=false ($4015 write 0 と同等)
+    - non-Triangle channel (pulse1/2/noise) の length_counter clear
+    - Triangle length_counter は preserved ("triangle unaffected" 仕様)
+    - DMC: bytes_remaining clear + IRQ flag clear. sample_addr/sample_len は
+      preserved ($4012/$4013 は CPU RESET で影響受けない)
+    - Frame counter: IRQ flag clear, cycle reset. mode/inhibit は preserved. *)
 let reset (apu : t) : unit =
   apu.pulse1.enabled <- false;
   apu.pulse1.length_counter <- 0;
   apu.pulse2.enabled <- false;
   apu.pulse2.length_counter <- 0;
   apu.triangle.enabled <- false;
-  apu.triangle.length_counter <- 0;
+  (* Triangle length_counter は preserved *)
   apu.noise.enabled <- false;
   apu.noise.length_counter <- 0;
   apu.dmc.bytes_remaining <- 0;
   apu.dmc.irq_flag <- false;
+  (* DMC sample_addr_start / sample_len_start は preserved *)
   apu.frame_counter.irq_flag <- false;
   apu.frame_counter.cycle_in_seq <- 0
 

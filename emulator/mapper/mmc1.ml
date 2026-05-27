@@ -61,8 +61,10 @@ let reset_shift t =
   t.control <- t.control lor 0x0C;
   apply_control t
 
-(** Soft reset. shift register + control を起動時状態 (PRG mode 3) へ. *)
-let reset t = reset_shift t
+(** Soft reset. NESdev / Mesen 準拠: MMC1 soft reset は no-op.
+    shift register は $8000 への write で bit 7=1 のときのみ clear される
+    (= ゲーム自身の制御). CPU の RESET 信号では mapper は影響を受けない. *)
+let reset (_t : t) : unit = ()
 
 (** 5 回目の write で確定した value を target register に書き込む.
     target は最後の write address の bits 14-13 で決定. *)
