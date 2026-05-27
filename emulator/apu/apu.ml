@@ -1049,90 +1049,171 @@ let take_dmc_pending_stall (apu : t) : int = dmc_take_pending_stall apu.dmc
 
 let serialize (buf : Buffer.t) (apu : t) : unit =
   let put_u8 v = Buffer.add_char buf (Char.chr (v land 0xFF)) in
-  let put_u16 v = put_u8 v; put_u8 (v lsr 8) in
-  let put_u32 v = put_u16 v; put_u16 (v lsr 16) in
+  let put_u16 v =
+    put_u8 v;
+    put_u8 (v lsr 8)
+  in
+  let put_u32 v =
+    put_u16 v;
+    put_u16 (v lsr 16)
+  in
   let put_bool b = put_u8 (if b then 1 else 0) in
   let put_pulse (p : pulse) =
-    put_bool p.enabled; put_u8 p.duty; put_bool p.length_halt;
-    put_bool p.constant_volume; put_u8 p.envelope_period;
-    put_bool p.sweep_enable; put_u8 p.sweep_period; put_bool p.sweep_negate;
-    put_u8 p.sweep_shift; put_bool p.sweep_reload; put_u8 p.sweep_divider;
-    put_u16 p.timer_period; put_u16 p.timer_value; put_u8 p.sequencer_step;
-    put_u8 p.length_counter; put_bool p.envelope_start;
-    put_u8 p.envelope_divider; put_u8 p.envelope_decay
+    put_bool p.enabled;
+    put_u8 p.duty;
+    put_bool p.length_halt;
+    put_bool p.constant_volume;
+    put_u8 p.envelope_period;
+    put_bool p.sweep_enable;
+    put_u8 p.sweep_period;
+    put_bool p.sweep_negate;
+    put_u8 p.sweep_shift;
+    put_bool p.sweep_reload;
+    put_u8 p.sweep_divider;
+    put_u16 p.timer_period;
+    put_u16 p.timer_value;
+    put_u8 p.sequencer_step;
+    put_u8 p.length_counter;
+    put_bool p.envelope_start;
+    put_u8 p.envelope_divider;
+    put_u8 p.envelope_decay
   in
   put_pulse apu.pulse1;
   put_pulse apu.pulse2;
   (* triangle *)
   let t = apu.triangle in
-  put_bool t.enabled; put_bool t.control_halt;
+  put_bool t.enabled;
+  put_bool t.control_halt;
   put_u8 t.linear_counter_reload;
-  put_u16 t.timer_period; put_u16 t.timer_value;
-  put_u8 t.sequencer_step; put_u8 t.linear_counter;
-  put_bool t.linear_reload_flag; put_u8 t.length_counter;
+  put_u16 t.timer_period;
+  put_u16 t.timer_value;
+  put_u8 t.sequencer_step;
+  put_u8 t.linear_counter;
+  put_bool t.linear_reload_flag;
+  put_u8 t.length_counter;
   (* noise *)
   let n = apu.noise in
-  put_bool n.enabled; put_bool n.length_halt; put_bool n.constant_volume;
-  put_u8 n.envelope_period; put_bool n.mode;
-  put_u16 n.timer_period; put_u16 n.timer_value;
-  put_u16 n.lfsr; put_u8 n.length_counter;
-  put_bool n.envelope_start; put_u8 n.envelope_divider; put_u8 n.envelope_decay;
+  put_bool n.enabled;
+  put_bool n.length_halt;
+  put_bool n.constant_volume;
+  put_u8 n.envelope_period;
+  put_bool n.mode;
+  put_u16 n.timer_period;
+  put_u16 n.timer_value;
+  put_u16 n.lfsr;
+  put_u8 n.length_counter;
+  put_bool n.envelope_start;
+  put_u8 n.envelope_divider;
+  put_u8 n.envelope_decay;
   (* dmc *)
   let d = apu.dmc in
-  put_bool d.irq_enable; put_bool d.loop_flag;
-  put_u16 d.timer_period; put_u16 d.timer_value;
-  put_u8 d.dac; put_u16 d.sample_addr_start; put_u16 d.sample_len_start;
-  put_u16 d.current_addr; put_u16 d.bytes_remaining;
-  put_u16 (d.sample_buffer land 0xFFFF); (* -1 → 0xFFFF *)
-  put_u8 d.shift_reg; put_u8 d.shift_count; put_bool d.silence;
-  put_bool d.irq_flag; put_u32 d.pending_stall;
+  put_bool d.irq_enable;
+  put_bool d.loop_flag;
+  put_u16 d.timer_period;
+  put_u16 d.timer_value;
+  put_u8 d.dac;
+  put_u16 d.sample_addr_start;
+  put_u16 d.sample_len_start;
+  put_u16 d.current_addr;
+  put_u16 d.bytes_remaining;
+  put_u16 (d.sample_buffer land 0xFFFF);
+  (* -1 → 0xFFFF *)
+  put_u8 d.shift_reg;
+  put_u8 d.shift_count;
+  put_bool d.silence;
+  put_bool d.irq_flag;
+  put_u32 d.pending_stall;
   (* frame counter *)
   let fc = apu.frame_counter in
-  put_u8 (match fc.mode with Mode_4_step -> 0 | Mode_5_step -> 1);
-  put_bool fc.irq_inhibit; put_u32 fc.cycle_in_seq; put_bool fc.irq_flag
+  put_u8
+    (match fc.mode with
+     | Mode_4_step -> 0
+     | Mode_5_step -> 1);
+  put_bool fc.irq_inhibit;
+  put_u32 fc.cycle_in_seq;
+  put_bool fc.irq_flag
 
 let deserialize (b : Bytes.t) (cursor : int ref) (apu : t) : unit =
-  let get_u8 () = let v = Bytes.get_uint8 b !cursor in incr cursor; v in
-  let get_u16 () = let lo = get_u8 () in let hi = get_u8 () in lo lor (hi lsl 8) in
+  let get_u8 () =
+    let v = Bytes.get_uint8 b !cursor in
+    incr cursor;
+    v
+  in
+  let get_u16 () =
+    let lo = get_u8 () in
+    let hi = get_u8 () in
+    lo lor (hi lsl 8)
+  in
   let get_u32 () =
-    let lo = get_u16 () in let hi = get_u16 () in lo lor (hi lsl 16)
+    let lo = get_u16 () in
+    let hi = get_u16 () in
+    lo lor (hi lsl 16)
   in
   let get_bool () = get_u8 () <> 0 in
   let load_pulse (p : pulse) =
-    p.enabled <- get_bool (); p.duty <- get_u8 (); p.length_halt <- get_bool ();
-    p.constant_volume <- get_bool (); p.envelope_period <- get_u8 ();
-    p.sweep_enable <- get_bool (); p.sweep_period <- get_u8 ();
-    p.sweep_negate <- get_bool (); p.sweep_shift <- get_u8 ();
-    p.sweep_reload <- get_bool (); p.sweep_divider <- get_u8 ();
-    p.timer_period <- get_u16 (); p.timer_value <- get_u16 ();
-    p.sequencer_step <- get_u8 (); p.length_counter <- get_u8 ();
-    p.envelope_start <- get_bool (); p.envelope_divider <- get_u8 ();
+    p.enabled <- get_bool ();
+    p.duty <- get_u8 ();
+    p.length_halt <- get_bool ();
+    p.constant_volume <- get_bool ();
+    p.envelope_period <- get_u8 ();
+    p.sweep_enable <- get_bool ();
+    p.sweep_period <- get_u8 ();
+    p.sweep_negate <- get_bool ();
+    p.sweep_shift <- get_u8 ();
+    p.sweep_reload <- get_bool ();
+    p.sweep_divider <- get_u8 ();
+    p.timer_period <- get_u16 ();
+    p.timer_value <- get_u16 ();
+    p.sequencer_step <- get_u8 ();
+    p.length_counter <- get_u8 ();
+    p.envelope_start <- get_bool ();
+    p.envelope_divider <- get_u8 ();
     p.envelope_decay <- get_u8 ()
   in
   load_pulse apu.pulse1;
   load_pulse apu.pulse2;
   let t = apu.triangle in
-  t.enabled <- get_bool (); t.control_halt <- get_bool ();
+  t.enabled <- get_bool ();
+  t.control_halt <- get_bool ();
   t.linear_counter_reload <- get_u8 ();
-  t.timer_period <- get_u16 (); t.timer_value <- get_u16 ();
-  t.sequencer_step <- get_u8 (); t.linear_counter <- get_u8 ();
-  t.linear_reload_flag <- get_bool (); t.length_counter <- get_u8 ();
+  t.timer_period <- get_u16 ();
+  t.timer_value <- get_u16 ();
+  t.sequencer_step <- get_u8 ();
+  t.linear_counter <- get_u8 ();
+  t.linear_reload_flag <- get_bool ();
+  t.length_counter <- get_u8 ();
   let n = apu.noise in
-  n.enabled <- get_bool (); n.length_halt <- get_bool (); n.constant_volume <- get_bool ();
-  n.envelope_period <- get_u8 (); n.mode <- get_bool ();
-  n.timer_period <- get_u16 (); n.timer_value <- get_u16 ();
-  n.lfsr <- get_u16 (); n.length_counter <- get_u8 ();
-  n.envelope_start <- get_bool (); n.envelope_divider <- get_u8 (); n.envelope_decay <- get_u8 ();
+  n.enabled <- get_bool ();
+  n.length_halt <- get_bool ();
+  n.constant_volume <- get_bool ();
+  n.envelope_period <- get_u8 ();
+  n.mode <- get_bool ();
+  n.timer_period <- get_u16 ();
+  n.timer_value <- get_u16 ();
+  n.lfsr <- get_u16 ();
+  n.length_counter <- get_u8 ();
+  n.envelope_start <- get_bool ();
+  n.envelope_divider <- get_u8 ();
+  n.envelope_decay <- get_u8 ();
   let d = apu.dmc in
-  d.irq_enable <- get_bool (); d.loop_flag <- get_bool ();
-  d.timer_period <- get_u16 (); d.timer_value <- get_u16 ();
-  d.dac <- get_u8 (); d.sample_addr_start <- get_u16 ();
-  d.sample_len_start <- get_u16 (); d.current_addr <- get_u16 ();
+  d.irq_enable <- get_bool ();
+  d.loop_flag <- get_bool ();
+  d.timer_period <- get_u16 ();
+  d.timer_value <- get_u16 ();
+  d.dac <- get_u8 ();
+  d.sample_addr_start <- get_u16 ();
+  d.sample_len_start <- get_u16 ();
+  d.current_addr <- get_u16 ();
   d.bytes_remaining <- get_u16 ();
   let sb = get_u16 () in
   d.sample_buffer <- (if sb = 0xFFFF then -1 else sb);
-  d.shift_reg <- get_u8 (); d.shift_count <- get_u8 (); d.silence <- get_bool ();
-  d.irq_flag <- get_bool (); d.pending_stall <- get_u32 ();
+  d.shift_reg <- get_u8 ();
+  d.shift_count <- get_u8 ();
+  d.silence <- get_bool ();
+  d.irq_flag <- get_bool ();
+  d.pending_stall <- get_u32 ();
   let fc = apu.frame_counter in
   fc.mode <- (if get_u8 () = 0 then Mode_4_step else Mode_5_step);
-  fc.irq_inhibit <- get_bool (); fc.cycle_in_seq <- get_u32 (); fc.irq_flag <- get_bool ()
+  fc.irq_inhibit <- get_bool ();
+  fc.cycle_in_seq <- get_u32 ();
+  fc.irq_flag <- get_bool ()

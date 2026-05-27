@@ -14,7 +14,8 @@ type mapper_io =
   ; irq_pending : unit -> bool
   ; on_a12_rise : unit -> unit
   ; reset : unit -> unit (** Soft reset hook. *)
-  ; sram : Bytes.t option (** battery-backed PRG-RAM ($6000-$7FFF). None なら non-battery. *)
+  ; sram : Bytes.t option
+    (** battery-backed PRG-RAM ($6000-$7FFF). None なら non-battery. *)
   ; serialize : Buffer.t -> unit
   ; deserialize : Bytes.t -> int ref -> unit
   }
@@ -130,9 +131,12 @@ let make_mapper
     ; on_a12_rise = no_a12
     ; reset = no_reset
     ; sram = None
-    ; serialize = (fun buf -> Buffer.add_char buf (Char.chr (!chr_bank land 0xFF)))
+    ; serialize =
+        (fun buf -> Buffer.add_char buf (Char.chr (!chr_bank land 0xFF)))
     ; deserialize =
-        (fun b c -> chr_bank := Bytes.get_uint8 b !c; incr c)
+        (fun b c ->
+          chr_bank := Bytes.get_uint8 b !c;
+          incr c)
     }
   | Rom.Cartridge.UNROM { prg; chr_ram } ->
     let bank_lo = ref 0 in
@@ -153,9 +157,11 @@ let make_mapper
           Buffer.add_bytes buf chr_ram)
     ; deserialize =
         (fun b c ->
-          bank_lo := Bytes.get_uint8 b !c; incr c;
+          bank_lo := Bytes.get_uint8 b !c;
+          incr c;
           let n = Bytes.length chr_ram in
-          Bytes.blit b !c chr_ram 0 n; c := !c + n)
+          Bytes.blit b !c chr_ram 0 n;
+          c := !c + n)
     }
   | Rom.Cartridge.MMC1 { prg; chr; chr_is_ram } ->
     let m = Mapper.Mmc1.create ~prg ~chr ~chr_is_ram ~set_mirroring in
@@ -386,12 +392,12 @@ let sram (nes : t) : Bytes.t option = nes.mapper.sram
 let load_sram (nes : t) (b : Bytes.t) : bool =
   if Bytes.length b <> 0x2000
   then false
-  else
+  else (
     match nes.mapper.sram with
     | None -> false
     | Some target ->
       Bytes.blit b 0 target 0 0x2000;
-      true
+      true)
 
 (* ------------------------------------------------------------------ *)
 (* Quick save / load (state serialization)                             *)
@@ -407,10 +413,10 @@ let save_magic = "FAMICAM1"
 let save_state (nes : t) : Bytes.t =
   (* instruction 境界まで進める *)
   if nes.cpu.pending <> []
-  then (
+  then
     while nes.cpu.pending <> [] do
       Cpu.tick nes.memory_bus nes.cpu
-    done);
+    done;
   let buf = Buffer.create (32 * 1024) in
   Buffer.add_string buf save_magic;
   Cpu.serialize buf nes.cpu;
@@ -425,7 +431,8 @@ let save_state (nes : t) : Bytes.t =
   Buffer.to_bytes buf
 
 let load_state (nes : t) (b : Bytes.t) : bool =
-  if Bytes.length b < String.length save_magic then false
+  if Bytes.length b < String.length save_magic
+  then false
   else if not (Bytes.sub_string b 0 (String.length save_magic) = save_magic)
   then false
   else (

@@ -141,11 +141,31 @@ external asInput: Dom.element => htmlInputElement = "%identity"
 
 type blob
 @new external newBlob: (array<uint8Array>, {..}) => blob = "Blob"
+
+@send
+external canvasToBlob: (htmlCanvasElement, blob => unit, @as("image/png") _) => unit = "toBlob"
+@val @scope("document")
+external createCanvasElem: @as("canvas") _ => htmlCanvasElement = "createElement"
+@set external setCanvasWidth: (htmlCanvasElement, int) => unit = "width"
+@set external setCanvasHeight: (htmlCanvasElement, int) => unit = "height"
+@send
+external drawCanvasRegion: (
+  ctx2d,
+  htmlCanvasElement,
+  int,
+  int,
+  int,
+  int,
+  int,
+  int,
+  int,
+  int,
+) => unit = "drawImage"
 @val @scope("URL") external createObjectURL: blob => string = "createObjectURL"
 @val @scope("URL") external revokeObjectURL: string => unit = "revokeObjectURL"
 
 type anchorElement
-@val @scope("document") external createAnchor: (@as("a") _) => anchorElement = "createElement"
+@val @scope("document") external createAnchor: @as("a") _ => anchorElement = "createElement"
 @set external anchorHref: (anchorElement, string) => unit = "href"
 @set external anchorDownload: (anchorElement, string) => unit = "download"
 @send external anchorClick: anchorElement => unit = "click"
@@ -340,8 +360,7 @@ module Swatch = {
     /* 背景の明度に応じてラベル色を反転 (Y' = 0.299R + 0.587G + 0.114B) */
     let luminance = (r * 299 + g * 587 + b * 114) / 1000
     let textColor = luminance > 128 ? "#000" : "#fff"
-    let shadowColor =
-      luminance > 128 ? "rgba(255,255,255,0.6)" : "rgba(0,0,0,0.6)"
+    let shadowColor = luminance > 128 ? "rgba(255,255,255,0.6)" : "rgba(0,0,0,0.6)"
     let style: JsxDOMStyle.t = {
       width: Int.toString(size) ++ "px",
       height: Int.toString(size) ++ "px",
@@ -384,23 +403,23 @@ type binding = {
 let defaultKeymap = (): Map.t<string, binding> => {
   let m = Map.make()
   /* P1: ユーザ好みで A=X, B=Z */
-  Map.set(m, "KeyX", {player: 0, button: 0})       /* A */
-  Map.set(m, "KeyZ", {player: 0, button: 1})       /* B */
+  Map.set(m, "KeyX", {player: 0, button: 0}) /* A */
+  Map.set(m, "KeyZ", {player: 0, button: 1}) /* B */
   Map.set(m, "ShiftRight", {player: 0, button: 2}) /* Select */
-  Map.set(m, "Enter", {player: 0, button: 3})      /* Start */
+  Map.set(m, "Enter", {player: 0, button: 3}) /* Start */
   Map.set(m, "ArrowUp", {player: 0, button: 4})
   Map.set(m, "ArrowDown", {player: 0, button: 5})
   Map.set(m, "ArrowLeft", {player: 0, button: 6})
   Map.set(m, "ArrowRight", {player: 0, button: 7})
   /* P2: 左手側 (FGRT) + 右手側 (IJKL) */
-  Map.set(m, "KeyG", {player: 1, button: 0})       /* A */
-  Map.set(m, "KeyF", {player: 1, button: 1})       /* B */
-  Map.set(m, "KeyR", {player: 1, button: 2})       /* Select */
-  Map.set(m, "KeyT", {player: 1, button: 3})       /* Start */
-  Map.set(m, "KeyI", {player: 1, button: 4})       /* Up */
-  Map.set(m, "KeyK", {player: 1, button: 5})       /* Down */
-  Map.set(m, "KeyJ", {player: 1, button: 6})       /* Left */
-  Map.set(m, "KeyL", {player: 1, button: 7})       /* Right */
+  Map.set(m, "KeyG", {player: 1, button: 0}) /* A */
+  Map.set(m, "KeyF", {player: 1, button: 1}) /* B */
+  Map.set(m, "KeyR", {player: 1, button: 2}) /* Select */
+  Map.set(m, "KeyT", {player: 1, button: 3}) /* Start */
+  Map.set(m, "KeyI", {player: 1, button: 4}) /* Up */
+  Map.set(m, "KeyK", {player: 1, button: 5}) /* Down */
+  Map.set(m, "KeyJ", {player: 1, button: 6}) /* Left */
+  Map.set(m, "KeyL", {player: 1, button: 7}) /* Right */
   m
 }
 
@@ -419,7 +438,7 @@ module App = {
     let sramFileInput = React.useRef(Nullable.null)
 
     /* Palette 状態。wasm 側の真値をミラーする。
-       UI からの編集はまず wasm を呼んでから state に reflect する. */
+     UI からの編集はまず wasm を呼んでから state に reflect する. */
     let initialMaster = switch Nullable.toOption(famiCaml) {
     | Some(api) => api.getMasterPalette()
     | None => newUint8Array(%raw(`new ArrayBuffer(192)`))
@@ -434,7 +453,10 @@ module App = {
     let (showCode, setShowCode) = React.useState(() => false)
     let (running, setRunning) = React.useState(() => false)
     let (fps, setFps) = React.useState(() => 0.0)
-    let (hideOverscan, setHideOverscan) = React.useState(() => false)
+    /* showOverscan: ON で 240 line 全表示, OFF (= default) で上下 8 line crop. */
+    let (showOverscan, setShowOverscan) = React.useState(() => false)
+    let showOverscanRef = React.useRef(false)
+    let selectedNameRef = React.useRef("")
     let (speedMul, setSpeedMul) = React.useState(() => 1.0)
     let speedMulRef = React.useRef(1.0)
     let speedAccumRef = React.useRef(0.0)
@@ -443,7 +465,7 @@ module App = {
     let (saveMsg, setSaveMsg) = React.useState(() => "")
     let runningRef = React.useRef(false)
     /* Audio: AudioContext + AudioWorklet は user gesture (= 初回 Power ON) が
-       必要なので lazy 初期化. None = まだ作っていない. */
+     必要なので lazy 初期化. None = まだ作っていない. */
     let audioCtxRef = React.useRef((None: option<audioContext>))
     let audioNodeRef = React.useRef((None: option<audioWorkletNode>))
     let audioGainRef = React.useRef((None: option<gainNode>))
@@ -516,7 +538,7 @@ module App = {
         | Some(api) =>
           try {
             /* 可変クロック速度: 1 RAF tick あたり speedMul 個分の NES frame
-               を実行 (or 飛ばす). accumulator 方式で fractional 値も自然に. */
+             を実行 (or 飛ばす). accumulator 方式で fractional 値も自然に. */
             speedAccumRef.current = speedAccumRef.current +. speedMulRef.current
             let framesThisRaf = ref(0)
             while speedAccumRef.current >= 1.0 && framesThisRaf.contents < 16 {
@@ -528,6 +550,7 @@ module App = {
             if framesThisRaf > 0 {
               renderNesFrame(canvasNes)
             }
+
             /* Audio: 蓄積されたサンプルを worklet に流し込む.
                1 frame ≒ 735 samples @ 44.1kHz (or 800 @ 48kHz). 余裕を持って 4096 まで取る.
                速度変更時は音はピッチが変わる (NES native rate のまま流すため). */
@@ -540,8 +563,9 @@ module App = {
               }
             }
             let now = performanceNow()
+
             /* 初回 (lastFrameTimeRef = 0) はスキップ. それ以外は delta から
-               瞬間 FPS を出して EMA で平滑化. */
+             瞬間 FPS を出して EMA で平滑化. */
             if lastFrameTimeRef.current > 0.0 {
               let delta = now -. lastFrameTimeRef.current
               if delta > 0.0 {
@@ -558,8 +582,9 @@ module App = {
             if mod(frameCountRef.current, 15) == 0 {
               setFps(_ => fpsEmaRef.current)
             }
+
             /* setState は React 再レンダー + Pattern Tables 再描画を triggers
-               するので毎フレームは重い. 4 フレーム (= 15Hz) ごとに throttle. */
+             するので毎フレームは重い. 4 フレーム (= 15Hz) ごとに throttle. */
             if mod(frameCountRef.current, 4) == 0 {
               setState(_ => Some(api.state()))
             }
@@ -582,6 +607,7 @@ module App = {
       if !runningRef.current {
         runningRef.current = true
         setRunning(_ => true)
+
         /* lastFrameTimeRef = 0.0 で初回 delta 計算を skip させる */
         lastFrameTimeRef.current = 0.0
         frameCountRef.current = 0
@@ -627,13 +653,12 @@ module App = {
     }, (powerOn, hasCart, running))
 
     /* AudioContext + AudioWorklet を lazy 初期化 (user gesture 必要なので
-       Power ON 押下時に呼ぶ). 初回成功で audioReadyRef.current = true. */
+     Power ON 押下時に呼ぶ). 初回成功で audioReadyRef.current = true. */
     let ensureAudio = api =>
       switch audioCtxRef.current {
       | Some(ctx) =>
         /* 既に作成済み. suspend されてたら resume. */
         let _ = audioContextResume(ctx)
-        ()
       | None =>
         let ctx = newAudioContext()
         audioCtxRef.current = Some(ctx)
@@ -667,7 +692,6 @@ module App = {
           switch audioCtxRef.current {
           | Some(ctx) =>
             let _ = audioContextSuspend(ctx)
-            ()
           | None => ()
           }
         } else {
@@ -704,7 +728,9 @@ module App = {
       switch Nullable.toOption(targetFiles(target)) {
       | Some(fs) if fileListLength(fs) > 0 =>
         let f = fileListItem(fs, 0)
-        setSelectedName(_ => fileName(f))
+        let nm = fileName(f)
+        setSelectedName(_ => nm)
+        selectedNameRef.current = nm
         switch Nullable.toOption(famiCaml) {
         | None => setLastError(_ => Some("WASM module not yet loaded"))
         | Some(api) =>
@@ -729,8 +755,8 @@ module App = {
             setLastError(_ => None)
           } else {
             setLastError(_ => Some(
-              "SRAM 読み込み失敗 (8KB ちょうど & battery-backed cart 必要; size = "
-              ++ Int.toString(uint8ArrayLength(arr)) ++ ")",
+              "SRAM 読み込み失敗 (8KB ちょうど & battery-backed cart 必要; size = " ++
+              Int.toString(uint8ArrayLength(arr)) ++ ")",
             ))
           }
         })
@@ -771,9 +797,10 @@ module App = {
             setLastError(_ => None)
             refreshPalette()
           } else {
-            setLastError(_ =>
-              Some(".pal の読み込みに失敗 (size = " ++ Int.toString(uint8ArrayLength(arr)) ++ " byte, expected 192)")
-            )
+            setLastError(_ => Some(
+              ".pal の読み込みに失敗 (size = " ++
+              Int.toString(uint8ArrayLength(arr)) ++ " byte, expected 192)",
+            ))
           }
         })
         ->ignore
@@ -789,6 +816,7 @@ module App = {
         setState(_ => Some(api.state()))
       })
       setSelectedName(_ => "")
+      selectedNameRef.current = ""
       switch Nullable.toOption(romFileInput.current) {
       | Some(el) => setInputValue(asInput(el), "")
       | None => ()
@@ -799,8 +827,7 @@ module App = {
     /* GainNode の volume を更新するヘルパー. mute 時は強制 0. */
     let applyGain = (vol, isMuted) =>
       switch audioGainRef.current {
-      | Some(g) =>
-        audioParamSetValue(gainNodeGain(g), isMuted ? 0.0 : vol)
+      | Some(g) => audioParamSetValue(gainNodeGain(g), isMuted ? 0.0 : vol)
       | None => ()
       }
     let onVolumeChange = (event: ReactEvent.Form.t) => {
@@ -816,6 +843,56 @@ module App = {
       setMuted(_ => next)
       applyGain(volume, next)
     }
+
+    /* Screenshot: NES canvas を PNG として download. Ctrl+P で呼ぶ.
+       showOverscan OFF (= default) のときは上下 8 line を crop (= 256x224).
+       ON のときは 256x240 そのまま. ファイル名: {ROM名}_{YYYYMMDD_HHMMSS}.png. */
+    let takeScreenshot = () =>
+      switch canvasNes.current->Nullable.toOption {
+      | Some(elt) =>
+        let src = asCanvas(elt)
+        let outCanvas = if !showOverscanRef.current {
+          let tmp = createCanvasElem()
+          setCanvasWidth(tmp, 256)
+          setCanvasHeight(tmp, 224)
+          let ctx = getContext2d(tmp)
+          drawCanvasRegion(ctx, src, 0, 8, 256, 224, 0, 0, 256, 224)
+          tmp
+        } else {
+          src
+        }
+        canvasToBlob(outCanvas, blob => {
+          let url = createObjectURL(blob)
+          let a = createAnchor()
+          let pad2 = (n: int) => n < 10 ? "0" ++ Int.toString(n) : Int.toString(n)
+          let d = Js.Date.make()
+          let ts =
+            Int.toString(Js.Date.getFullYear(d)->Belt.Float.toInt) ++
+            pad2(Js.Date.getMonth(d)->Belt.Float.toInt + 1) ++
+            pad2(Js.Date.getDate(d)->Belt.Float.toInt) ++
+            "_" ++
+            pad2(Js.Date.getHours(d)->Belt.Float.toInt) ++
+            pad2(Js.Date.getMinutes(d)->Belt.Float.toInt) ++
+            pad2(Js.Date.getSeconds(d)->Belt.Float.toInt)
+          let nm = selectedNameRef.current
+          let base = if nm == "" {
+            "famicaml"
+          } else {
+            /* .nes 拡張子があれば剥がす */
+            let n = String.length(nm)
+            if n > 4 && String.sliceToEnd(nm, ~start=n - 4) == ".nes" {
+              String.slice(nm, ~start=0, ~end=n - 4)
+            } else {
+              nm
+            }
+          }
+          anchorHref(a, url)
+          anchorDownload(a, base ++ "_" ++ ts ++ ".png")
+          anchorClick(a)
+          revokeObjectURL(url)
+        })
+      | None => ()
+      }
 
     /* Quick save / load. localStorage に slot ごとに base64 で保存. */
     let quickSaveKey = slot => "famicaml-save-slot-" ++ Int.toString(slot)
@@ -844,8 +921,8 @@ module App = {
       | None => ()
       }
 
-    let onRun = _ => startRun ()
-    let onStop = _ => stopRun ()
+    let onRun = _ => startRun()
+    let onStop = _ => stopRun()
     let onStep = _ =>
       switch Nullable.toOption(famiCaml) {
       | Some(api) =>
@@ -857,16 +934,17 @@ module App = {
 
     /* unmount で必ず止める */
     React.useEffect0(() => {
-      Some(() => stopRun ())
+      Some(() => stopRun())
     })
 
     /* キーボード入力 → コントローラ.
-       keymap は ref で保持し、将来 UI から再設定できる構造にしておく. */
+     keymap は ref で保持し、将来 UI から再設定できる構造にしておく. */
     let keymapRef = React.useRef(defaultKeymap())
     React.useEffect0(() => {
       let onKeyDown = e => {
         let code = keyEventCode(e)
         let ctrl = keyEventCtrl(e) || keyEventMeta(e)
+
         /* Ctrl+S = quick save / Ctrl+L = quick load (current slot). */
         if ctrl && code == "KeyS" {
           keyEventPreventDefault(e)
@@ -877,6 +955,11 @@ module App = {
           keyEventPreventDefault(e)
           if !keyEventRepeat(e) {
             quickLoad(saveSlotRef.current)
+          }
+        } else if ctrl && code == "KeyP" {
+          keyEventPreventDefault(e)
+          if !keyEventRepeat(e) {
+            takeScreenshot()
           }
         } else {
           switch Map.get(keymapRef.current, code) {
@@ -910,11 +993,13 @@ module App = {
       windowAddKeyListener("keydown", onKeyDown)
       windowAddKeyListener("keyup", onKeyUp)
       windowAddBlurListener("blur", onBlur)
-      Some(() => {
-        windowRemoveKeyListener("keydown", onKeyDown)
-        windowRemoveKeyListener("keyup", onKeyUp)
-        windowRemoveBlurListener("blur", onBlur)
-      })
+      Some(
+        () => {
+          windowRemoveKeyListener("keydown", onKeyDown)
+          windowRemoveKeyListener("keyup", onKeyUp)
+          windowRemoveBlurListener("blur", onBlur)
+        },
+      )
     })
 
     let onExportPal = _ =>
@@ -935,13 +1020,14 @@ module App = {
     let onSubSlotClick = slot => _ => setActiveSlot(_ => slot)
 
     /* master 色クリック → activeSlot にアサイン */
-    let onMasterClick = idx => _ =>
-      switch Nullable.toOption(famiCaml) {
-      | Some(api) =>
-        api.setViewerSubSlot(activeSlot, idx)
-        setSub(_ => api.getViewerSub())
-      | None => ()
-      }
+    let onMasterClick = idx =>
+      _ =>
+        switch Nullable.toOption(famiCaml) {
+        | Some(api) =>
+          api.setViewerSubSlot(activeSlot, idx)
+          setSub(_ => api.getViewerSub())
+        | None => ()
+        }
 
     /* color picker で activeSlot に対応する master 色を編集 */
     let activeMasterIdx = uint8ArrayLength(sub) >= 4 ? uint8At(sub, activeSlot) : 0
@@ -959,10 +1045,10 @@ module App = {
       }
     }
 
-    let renderRow = (label, value) =>
-      <>
-        <dt> {React.string(label)} </dt> <dd> {React.string(value)} </dd>
-      </>
+    let renderRow = (label, value) => <>
+      <dt> {React.string(label)} </dt>
+      <dd> {React.string(value)} </dd>
+    </>
 
     let cartSection = (cart: cartInfo) =>
       <dl style={{marginTop: "0.5rem"}}>
@@ -974,33 +1060,32 @@ module App = {
         {renderRow("CHR", kbStr(cart.chrSize))}
       </dl>
 
-    let stateSection = (s: nesState) =>
-      <>
-        <dl style={{marginTop: "0.5rem"}}>
-          {renderRow("Power", s.power ? "ON" : "OFF")}
-          {renderRow("PC", hex16(s.pc))}
-          {renderRow("RESET", hex16(s.resetVector))}
-          {renderRow("NMI", hex16(s.nmiVector))}
-          {renderRow("IRQ", hex16(s.irqVector))}
-          {renderRow("CPU cycles", Int.toString(s.cpuCycles))}
-          {renderRow("PPU frame", Int.toString(s.ppuFrame))}
-          {renderRow(
-            "PPU scanline/dot",
-            Int.toString(s.ppuScanline) ++ " / " ++ Int.toString(s.ppuDot),
-          )}
-        </dl>
-        {switch Nullable.toOption(s.cart) {
-        | Some(c) =>
-          <>
-            <h3 style={{marginTop: "1rem"}}> {React.string("Cartridge")} </h3>
-            {cartSection(c)}
-          </>
-        | None =>
-          <p style={{color: "#666", marginTop: "0.5rem"}}>
-            {React.string("(no cartridge inserted)")}
-          </p>
-        }}
-      </>
+    let stateSection = (s: nesState) => <>
+      <dl style={{marginTop: "0.5rem"}}>
+        {renderRow("Power", s.power ? "ON" : "OFF")}
+        {renderRow("PC", hex16(s.pc))}
+        {renderRow("RESET", hex16(s.resetVector))}
+        {renderRow("NMI", hex16(s.nmiVector))}
+        {renderRow("IRQ", hex16(s.irqVector))}
+        {renderRow("CPU cycles", Int.toString(s.cpuCycles))}
+        {renderRow("PPU frame", Int.toString(s.ppuFrame))}
+        {renderRow(
+          "PPU scanline/dot",
+          Int.toString(s.ppuScanline) ++ " / " ++ Int.toString(s.ppuDot),
+        )}
+      </dl>
+      {switch Nullable.toOption(s.cart) {
+      | Some(c) =>
+        <>
+          <h3 style={{marginTop: "1rem"}}> {React.string("Cartridge")} </h3>
+          {cartSection(c)}
+        </>
+      | None =>
+        <p style={{color: "#666", marginTop: "0.5rem"}}>
+          {React.string("(no cartridge inserted)")}
+        </p>
+      }}
+    </>
 
     let buttonStyle: JsxDOMStyle.t = {
       padding: "0.4rem 0.8rem",
@@ -1023,17 +1108,14 @@ module App = {
         {Belt.Array.makeBy(4, i => i)
         ->Belt.Array.map(i => {
           let mi = uint8ArrayLength(sub) >= 4 ? uint8At(sub, i) : 0
-          let (r, g, b) =
-            uint8ArrayLength(master) >= 192 ? readMaster(master, mi) : (0, 0, 0)
+          let (r, g, b) = uint8ArrayLength(master) >= 192 ? readMaster(master, mi) : (0, 0, 0)
           <div
-            key={Int.toString(i)}
-            style={{textAlign: "center", fontSize: "0.75rem", color: "#444"}}>
+            key={Int.toString(i)} style={{textAlign: "center", fontSize: "0.75rem", color: "#444"}}
+          >
             <Swatch
               r g b size=36 selected={i == activeSlot} title={hex8(mi)} onClick={onSubSlotClick(i)}
             />
-            <div style={{marginTop: "0.25rem"}}>
-              {React.string("slot " ++ Int.toString(i))}
-            </div>
+            <div style={{marginTop: "0.25rem"}}> {React.string("slot " ++ Int.toString(i))} </div>
             <div style={{fontFamily: "monospace"}}> {React.string(hex8(mi))} </div>
           </div>
         })
@@ -1048,11 +1130,11 @@ module App = {
           gridTemplateColumns: "repeat(16, 24px)",
           gridTemplateRows: "repeat(4, 24px)",
           gap: "2px",
-        }}>
+        }}
+      >
         {Belt.Array.makeBy(64, i => i)
         ->Belt.Array.map(i => {
-          let (r, g, b) =
-            uint8ArrayLength(master) >= 192 ? readMaster(master, i) : (0, 0, 0)
+          let (r, g, b) = uint8ArrayLength(master) >= 192 ? readMaster(master, i) : (0, 0, 0)
           <Swatch
             key={Int.toString(i)}
             r
@@ -1074,17 +1156,15 @@ module App = {
         maxWidth: "640px",
         margin: "2rem auto",
         padding: "1rem",
-      }}>
+      }}
+    >
       <h1> {React.string("FamiCaml")} </h1>
       <p style={{color: "#666"}}>
         {React.string("対応マッパー: NROM (0) / MMC1 (1) / UNROM (2) / CNROM (3) / MMC3 (4)")}
       </p>
       <section style={{marginTop: "1rem"}}>
         <input
-          type_="file"
-          accept=".nes"
-          onChange={onRomChange}
-          ref={ReactDOM.Ref.domRef(romFileInput)}
+          type_="file" accept=".nes" onChange={onRomChange} ref={ReactDOM.Ref.domRef(romFileInput)}
         />
         {selectedName == ""
           ? React.null
@@ -1092,13 +1172,21 @@ module App = {
               {React.string("File: " ++ selectedName)}
             </p>}
       </section>
-      {/* battery-backed SRAM の load/save. cart.hasBattery が true でかつ
-          mapper が prg_ram を持つ場合のみ enable. */
-      switch state {
+      {switch /* battery-backed SRAM の load/save. cart.hasBattery が true でかつ
+       mapper が prg_ram を持つ場合のみ enable. */
+      state {
       | Some(s) =>
         switch Nullable.toOption(s.cart) {
         | Some(cart) if cart.hasBattery =>
-          <section style={{marginTop: "0.5rem", display: "flex", alignItems: "center", gap: "0.5rem", fontSize: "0.9rem"}}>
+          <section
+            style={{
+              marginTop: "0.5rem",
+              display: "flex",
+              alignItems: "center",
+              gap: "0.5rem",
+              fontSize: "0.9rem",
+            }}
+          >
             <span style={{color: "#666"}}> {React.string("SRAM (battery):")} </span>
             <input
               type_="file"
@@ -1120,7 +1208,8 @@ module App = {
           display: "flex",
           alignItems: "center",
           gap: "0.5rem",
-        }}>
+        }}
+      >
         <button onClick=togglePower style=buttonStyle>
           {React.string(powerOn ? "⏻ Power OFF" : "⏻ Power ON")}
         </button>
@@ -1150,7 +1239,8 @@ module App = {
           display: "flex",
           alignItems: "center",
           gap: "0.5rem",
-        }}>
+        }}
+      >
         {running
           ? <button onClick=onStop style=buttonStyle disabled={!powerOn}>
               {React.string("⏸ Pause")}
@@ -1164,7 +1254,15 @@ module App = {
         <span style={{color: "#666", fontFamily: "monospace", fontSize: "0.9rem"}}>
           {React.string("FPS: " ++ Float.toFixed(fps, ~digits=1))}
         </span>
-        <label style={{display: "inline-flex", alignItems: "center", gap: "0.5rem", marginLeft: "1rem", fontSize: "0.9rem"}}>
+        <label
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: "0.5rem",
+            marginLeft: "1rem",
+            fontSize: "0.9rem",
+          }}
+        >
           {React.string("Speed:")}
           <input
             type_="range"
@@ -1190,12 +1288,21 @@ module App = {
             onClick={_ => {
               setSpeedMul(_ => 1.0)
               speedMulRef.current = 1.0
-            }}>
+            }}
+          >
             {React.string("Reset")}
           </button>
         </label>
       </section>
-      <section style={{marginTop: "0.5rem", display: "flex", alignItems: "center", gap: "0.5rem", fontSize: "0.9rem"}}>
+      <section
+        style={{
+          marginTop: "0.5rem",
+          display: "flex",
+          alignItems: "center",
+          gap: "0.5rem",
+          fontSize: "0.9rem",
+        }}
+      >
         <span style={{color: "#666"}}> {React.string("Save slot:")} </span>
         <select
           value={Int.toString(saveSlot)}
@@ -1205,12 +1312,15 @@ module App = {
             let n = Int.fromString(v)->Option.getOr(0)
             setSaveSlot(_ => n)
             saveSlotRef.current = n
-          }}>
-          {React.array(Belt.Array.range(0, 3)->Belt.Array.map(i =>
-            <option key={Int.toString(i)} value={Int.toString(i)}>
-              {React.string(Int.toString(i))}
-            </option>
-          ))}
+          }}
+        >
+          {React.array(
+            Belt.Array.range(0, 3)->Belt.Array.map(i =>
+              <option key={Int.toString(i)} value={Int.toString(i)}>
+                {React.string(Int.toString(i))}
+              </option>
+            ),
+          )}
         </select>
         <button onClick={_ => quickSave(saveSlot)} style=buttonStyle title="Ctrl+S">
           {React.string("Save (Ctrl+S)")}
@@ -1220,11 +1330,17 @@ module App = {
         </button>
         {saveMsg == ""
           ? React.null
-          : <span style={{color: "#080", fontFamily: "monospace"}}>
-              {React.string(saveMsg)}
-            </span>}
+          : <span style={{color: "#080", fontFamily: "monospace"}}> {React.string(saveMsg)} </span>}
       </section>
-      <section style={{marginTop: "0.5rem", display: "flex", alignItems: "center", gap: "0.5rem", fontSize: "0.9rem"}}>
+      <section
+        style={{
+          marginTop: "0.5rem",
+          display: "flex",
+          alignItems: "center",
+          gap: "0.5rem",
+          fontSize: "0.9rem",
+        }}
+      >
         <span style={{color: "#666"}}> {React.string("Volume:")} </span>
         <input
           type_="range"
@@ -1245,33 +1361,41 @@ module App = {
       </section>
       {switch lastError {
       | Some(msg) =>
-        <p style={{color: "#c00", marginTop: "1rem"}}>
-          {React.string("Error: " ++ msg)}
-        </p>
+        <p style={{color: "#c00", marginTop: "1rem"}}> {React.string("Error: " ++ msg)} </p>
       | None => React.null
       }}
       <section style={{marginTop: "1rem"}}>
         <h2 style={{marginBottom: "0.5rem"}}> {React.string("Screen")} </h2>
-        <label style={{display: "inline-flex", alignItems: "center", gap: "0.5rem", marginBottom: "0.5rem", fontSize: "0.9rem"}}>
+        <label
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: "0.5rem",
+            marginBottom: "0.5rem",
+            fontSize: "0.9rem",
+          }}
+        >
           <input
             type_="checkbox"
-            checked={hideOverscan}
+            checked={showOverscan}
             onChange={event => {
               let target = ReactEvent.Form.target(event)
               let v: bool = target["checked"]
-              setHideOverscan(_ => v)
+              setShowOverscan(_ => v)
+              showOverscanRef.current = v
             }}
           />
-          {React.string("上下 8 line (overscan) を隠す")}
+          {React.string("上下 8 line (overscan) を表示")}
         </label>
         <div
           style={{
             width: "512px",
-            height: hideOverscan ? "448px" : "480px",
+            height: showOverscan ? "480px" : "448px",
             overflow: "hidden",
             border: "1px solid #444",
             backgroundColor: "#000",
-          }}>
+          }}
+        >
           <canvas
             ref={ReactDOM.Ref.domRef(canvasNes)}
             width="256"
@@ -1281,7 +1405,7 @@ module App = {
               height: "480px",
               imageRendering: "pixelated",
               display: "block",
-              marginTop: hideOverscan ? "-16px" : "0",
+              marginTop: showOverscan ? "0" : "-16px",
             }}
           />
         </div>
@@ -1324,7 +1448,8 @@ module App = {
             justifyContent: "space-between",
             alignItems: "baseline",
             margin: "0.75rem 0 0.25rem 0",
-          }}>
+          }}
+        >
           <h3 style={{margin: "0", fontSize: "0.95rem"}}>
             {React.string("Master Palette (64 colors)")}
           </h3>
@@ -1334,12 +1459,12 @@ module App = {
               color: "#444",
               cursor: "pointer",
               userSelect: "none",
-            }}>
+            }}
+          >
             <input
               type_="checkbox"
               checked={showCode}
-              onChange={event =>
-                setShowCode(_ => ReactEvent.Form.target(event)["checked"])}
+              onChange={event => setShowCode(_ => ReactEvent.Form.target(event)["checked"])}
               style={{marginRight: "0.25rem", verticalAlign: "middle"}}
             />
             {React.string("Show codes")}
@@ -1353,10 +1478,9 @@ module App = {
             alignItems: "center",
             gap: "0.5rem",
             fontSize: "0.9rem",
-          }}>
-          <span>
-            {React.string("Edit master " ++ hex8(activeMasterIdx) ++ ":")}
-          </span>
+          }}
+        >
+          <span> {React.string("Edit master " ++ hex8(activeMasterIdx) ++ ":")} </span>
           <input
             type_="color"
             value={cssHex(ar, ag, ab)}
@@ -1371,12 +1495,7 @@ module App = {
           <button onClick=onExportPal style=buttonStyle> {React.string("Export .pal")} </button>
           <label style=buttonStyle>
             {React.string("Import .pal")}
-            <input
-              type_="file"
-              accept=".pal"
-              onChange={onPalChange}
-              style={{display: "none"}}
-            />
+            <input type_="file" accept=".pal" onChange={onPalChange} style={{display: "none"}} />
           </label>
           <button onClick=onResetPal style=buttonStyle> {React.string("Reset palette")} </button>
         </div>

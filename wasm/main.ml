@@ -15,14 +15,15 @@ module Controller = Emulator.Controller
 let bytes_of_uint8array (arr : Typed_array.uint8Array Js.t) : bytes =
   Typed_array.Bytes.of_uint8Array arr
 
+(* js_of_ocaml 6.2 の primitive で zero-copy. OCaml bytes 内容を直接 JS
+   Uint8Array として view (= 値共有). フレームバッファ転送のホットパス
+   (毎フレーム 245760 byte) で per-byte JS interop loop を解消. *)
+
 (** OCaml の bytes を JS の Uint8Array に変換する。
     ImageData コンストラクタは Uint8ClampedArray を要求するが、
     js_of_ocaml 6.2 の Typed_array は ClampedArray を公開していないので、
     Uint8Array で返して JS 側 (ReScript) で
     [new Uint8ClampedArray(arr.buffer)] に巻き直す。 *)
-(* js_of_ocaml 6.2 の primitive で zero-copy. OCaml bytes 内容を直接 JS
-   Uint8Array として view (= 値共有). フレームバッファ転送のホットパス
-   (毎フレーム 245760 byte) で per-byte JS interop loop を解消. *)
 let uint8array_of_bytes (b : bytes) : Typed_array.uint8Array Js.t =
   Typed_array.Bytes.to_uint8Array b
 

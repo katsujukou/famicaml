@@ -113,8 +113,14 @@ let read (c : t) : int =
 let serialize (buf : Buffer.t) (c : t) : unit =
   let bit b s = if b then 1 lsl s else 0 in
   let btns =
-    bit c.a 0 lor bit c.b 1 lor bit c.select 2 lor bit c.start 3
-    lor bit c.up 4 lor bit c.down 5 lor bit c.left 6 lor bit c.right 7
+    bit c.a 0
+    lor bit c.b 1
+    lor bit c.select 2
+    lor bit c.start 3
+    lor bit c.up 4
+    lor bit c.down 5
+    lor bit c.left 6
+    lor bit c.right 7
   in
   Buffer.add_char buf (Char.chr btns);
   Buffer.add_char buf (if c.strobe then '\x01' else '\x00');
@@ -122,7 +128,11 @@ let serialize (buf : Buffer.t) (c : t) : unit =
   Buffer.add_char buf (Char.chr (c.read_count land 0xFF))
 
 let deserialize (b : Bytes.t) (cursor : int ref) (c : t) : unit =
-  let get () = let v = Bytes.get_uint8 b !cursor in incr cursor; v in
+  let get () =
+    let v = Bytes.get_uint8 b !cursor in
+    incr cursor;
+    v
+  in
   let btns = get () in
   c.a <- btns land 1 <> 0;
   c.b <- btns land 2 <> 0;

@@ -1007,9 +1007,7 @@ let tick (bus : Bus.t) (cpu : t) : unit =
      最適化: irq_pending も latch も全 false なら state 変化なし → skip. *)
   if cpu.irq_pending || cpu.irq_latch_a || cpu.irq_latch_b
   then (
-    let irq_now =
-      cpu.irq_pending && not (PS.get_flag PS.I cpu.reg_P)
-    in
+    let irq_now = cpu.irq_pending && not (PS.get_flag PS.I cpu.reg_P) in
     cpu.irq_latch_b <- cpu.irq_latch_a;
     cpu.irq_latch_a <- irq_now);
   cpu.cycles <- cpu.cycles + 1
@@ -1049,7 +1047,11 @@ let serialize (buf : Buffer.t) (cpu : t) : unit =
   Buffer.add_char buf (if cpu.irq_latch_b then '\x01' else '\x00')
 
 let deserialize (b : Bytes.t) (cursor : int ref) (cpu : t) : unit =
-  let get () = let v = Bytes.get_uint8 b !cursor in incr cursor; v in
+  let get () =
+    let v = Bytes.get_uint8 b !cursor in
+    incr cursor;
+    v
+  in
   let pc_lo = get () in
   let pc_hi = get () in
   cpu.reg_PC <- Uint16.of_int (pc_lo lor (pc_hi lsl 8));

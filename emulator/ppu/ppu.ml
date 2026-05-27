@@ -243,7 +243,10 @@ let reset (ppu : t) : unit =
 
 let serialize (buf : Buffer.t) (ppu : t) : unit =
   let put_u8 v = Buffer.add_char buf (Char.chr (v land 0xFF)) in
-  let put_u16 v = put_u8 v; put_u8 (v lsr 8) in
+  let put_u16 v =
+    put_u8 v;
+    put_u8 (v lsr 8)
+  in
   let put_bool b = put_u8 (if b then 1 else 0) in
   put_u8 (Uint8.to_int (Register.Ppu_control.to_uint8 ppu.ctrl));
   put_u8 (Uint8.to_int (Register.Ppu_mask.to_uint8 ppu.mask));
@@ -255,12 +258,16 @@ let serialize (buf : Buffer.t) (ppu : t) : unit =
   put_u8 (Uint8.to_int ppu.oam_addr);
   put_u8 (Uint8.to_int ppu.read_buffer);
   put_u8 (Uint8.to_int ppu.open_bus);
-  Buffer.add_bytes buf ppu.vram; (* 2KB *)
-  Buffer.add_bytes buf ppu.palette_ram; (* 32B *)
-  Buffer.add_bytes buf ppu.oam; (* 256B *)
+  Buffer.add_bytes buf ppu.vram;
+  (* 2KB *)
+  Buffer.add_bytes buf ppu.palette_ram;
+  (* 32B *)
+  Buffer.add_bytes buf ppu.oam;
+  (* 256B *)
   put_u16 ppu.dot;
   put_u16 ppu.scanline;
-  put_u16 (ppu.frame land 0xFFFF); (* low 16 bit; frame counter wrap OK *)
+  put_u16 (ppu.frame land 0xFFFF);
+  (* low 16 bit; frame counter wrap OK *)
   put_bool ppu.nmi_request;
   put_bool ppu.frame_complete;
   (* BG fetch pipeline state *)
@@ -276,8 +283,16 @@ let serialize (buf : Buffer.t) (ppu : t) : unit =
   put_u8 ppu.at_next_hi
 
 let deserialize (b : Bytes.t) (cursor : int ref) (ppu : t) : unit =
-  let get_u8 () = let v = Bytes.get_uint8 b !cursor in incr cursor; v in
-  let get_u16 () = let lo = get_u8 () in let hi = get_u8 () in lo lor (hi lsl 8) in
+  let get_u8 () =
+    let v = Bytes.get_uint8 b !cursor in
+    incr cursor;
+    v
+  in
+  let get_u16 () =
+    let lo = get_u8 () in
+    let hi = get_u8 () in
+    lo lor (hi lsl 8)
+  in
   let get_bool () = get_u8 () <> 0 in
   ppu.ctrl <- Register.Ppu_control.of_uint8 (Uint8.of_int (get_u8 ()));
   ppu.mask <- Register.Ppu_mask.of_uint8 (Uint8.of_int (get_u8 ()));
@@ -289,9 +304,12 @@ let deserialize (b : Bytes.t) (cursor : int ref) (ppu : t) : unit =
   ppu.oam_addr <- Uint8.of_int (get_u8 ());
   ppu.read_buffer <- Uint8.of_int (get_u8 ());
   ppu.open_bus <- Uint8.of_int (get_u8 ());
-  Bytes.blit b !cursor ppu.vram 0 0x0800; cursor := !cursor + 0x0800;
-  Bytes.blit b !cursor ppu.palette_ram 0 0x20; cursor := !cursor + 0x20;
-  Bytes.blit b !cursor ppu.oam 0 256; cursor := !cursor + 256;
+  Bytes.blit b !cursor ppu.vram 0 0x0800;
+  cursor := !cursor + 0x0800;
+  Bytes.blit b !cursor ppu.palette_ram 0 0x20;
+  cursor := !cursor + 0x20;
+  Bytes.blit b !cursor ppu.oam 0 256;
+  cursor := !cursor + 256;
   ppu.dot <- get_u16 ();
   ppu.scanline <- get_u16 ();
   ppu.frame <- get_u16 ();
@@ -1385,11 +1403,7 @@ let step (ppu : t) : unit =
   let rendering = mask.enable_bg || mask.enable_sprite in
   (* (1) dot/scanline 進行. NTSC odd-frame skip: rendering 有効な奇数 frame で
      pre-render scanline (261) dot 339 から次 frame (0,0) へ直接ジャンプ. *)
-  if
-    ppu.scanline = 261
-    && ppu.dot = 339
-    && rendering
-    && ppu.frame land 1 = 1
+  if ppu.scanline = 261 && ppu.dot = 339 && rendering && ppu.frame land 1 = 1
   then (
     ppu.dot <- 0;
     ppu.scanline <- 0;

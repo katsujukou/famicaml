@@ -55,4 +55,5 @@ val read : t -> int
 
 (** Quick save/load: 4 byte (buttons / strobe / shift / read_count). *)
 val serialize : Buffer.t -> t -> unit
+
 val deserialize : Bytes.t -> int ref -> t -> unit
