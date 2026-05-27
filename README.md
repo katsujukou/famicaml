@@ -1,3 +1,3 @@
-![FamiCaml](./famicaml-logo.png)
-
 # Project FamiCaml
+
+![FamiCaml](./famicaml-logo.png) 
