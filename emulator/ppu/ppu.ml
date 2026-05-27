@@ -234,6 +234,83 @@ let reset (ppu : t) : unit =
   ppu.at_next_lo <- 0;
   ppu.at_next_hi <- 0
 
+(* ------------------------------------------------------------------ *)
+(* State serialization (quick save/load 用)                            *)
+(* skip: framebuffer / bg_mask / palette caches / sprite_line caches —  *)
+(* これらは render 中に再構築される transient. master_palette / chr_io /  *)
+(* mirroring は cart 接続側で保持される. *)
+(* ------------------------------------------------------------------ *)
+
+let serialize (buf : Buffer.t) (ppu : t) : unit =
+  let put_u8 v = Buffer.add_char buf (Char.chr (v land 0xFF)) in
+  let put_u16 v = put_u8 v; put_u8 (v lsr 8) in
+  let put_bool b = put_u8 (if b then 1 else 0) in
+  put_u8 (Uint8.to_int (Register.Ppu_control.to_uint8 ppu.ctrl));
+  put_u8 (Uint8.to_int (Register.Ppu_mask.to_uint8 ppu.mask));
+  put_u8 (Uint8.to_int (Register.Ppu_status.to_uint8 ppu.status));
+  put_u16 (Uint16.to_int ppu.internal.v);
+  put_u16 (Uint16.to_int ppu.internal.t);
+  put_u8 (Uint8.to_int ppu.internal.x);
+  put_bool ppu.internal.w;
+  put_u8 (Uint8.to_int ppu.oam_addr);
+  put_u8 (Uint8.to_int ppu.read_buffer);
+  put_u8 (Uint8.to_int ppu.open_bus);
+  Buffer.add_bytes buf ppu.vram; (* 2KB *)
+  Buffer.add_bytes buf ppu.palette_ram; (* 32B *)
+  Buffer.add_bytes buf ppu.oam; (* 256B *)
+  put_u16 ppu.dot;
+  put_u16 ppu.scanline;
+  put_u16 (ppu.frame land 0xFFFF); (* low 16 bit; frame counter wrap OK *)
+  put_bool ppu.nmi_request;
+  put_bool ppu.frame_complete;
+  (* BG fetch pipeline state *)
+  put_u8 ppu.nt_latch;
+  put_u8 ppu.at_latch;
+  put_u8 ppu.pt_lo_latch;
+  put_u8 ppu.pt_hi_latch;
+  put_u16 ppu.bg_shift_lo;
+  put_u16 ppu.bg_shift_hi;
+  put_u8 ppu.at_shift_lo;
+  put_u8 ppu.at_shift_hi;
+  put_u8 ppu.at_next_lo;
+  put_u8 ppu.at_next_hi
+
+let deserialize (b : Bytes.t) (cursor : int ref) (ppu : t) : unit =
+  let get_u8 () = let v = Bytes.get_uint8 b !cursor in incr cursor; v in
+  let get_u16 () = let lo = get_u8 () in let hi = get_u8 () in lo lor (hi lsl 8) in
+  let get_bool () = get_u8 () <> 0 in
+  ppu.ctrl <- Register.Ppu_control.of_uint8 (Uint8.of_int (get_u8 ()));
+  ppu.mask <- Register.Ppu_mask.of_uint8 (Uint8.of_int (get_u8 ()));
+  ppu.status <- Register.Ppu_status.of_uint8 (Uint8.of_int (get_u8 ()));
+  ppu.internal.v <- Uint16.of_int (get_u16 ());
+  ppu.internal.t <- Uint16.of_int (get_u16 ());
+  ppu.internal.x <- Uint8.of_int (get_u8 ());
+  ppu.internal.w <- get_bool ();
+  ppu.oam_addr <- Uint8.of_int (get_u8 ());
+  ppu.read_buffer <- Uint8.of_int (get_u8 ());
+  ppu.open_bus <- Uint8.of_int (get_u8 ());
+  Bytes.blit b !cursor ppu.vram 0 0x0800; cursor := !cursor + 0x0800;
+  Bytes.blit b !cursor ppu.palette_ram 0 0x20; cursor := !cursor + 0x20;
+  Bytes.blit b !cursor ppu.oam 0 256; cursor := !cursor + 256;
+  ppu.dot <- get_u16 ();
+  ppu.scanline <- get_u16 ();
+  ppu.frame <- get_u16 ();
+  ppu.nmi_request <- get_bool ();
+  ppu.frame_complete <- get_bool ();
+  ppu.nt_latch <- get_u8 ();
+  ppu.at_latch <- get_u8 ();
+  ppu.pt_lo_latch <- get_u8 ();
+  ppu.pt_hi_latch <- get_u8 ();
+  ppu.bg_shift_lo <- get_u16 ();
+  ppu.bg_shift_hi <- get_u16 ();
+  ppu.at_shift_lo <- get_u8 ();
+  ppu.at_shift_hi <- get_u8 ();
+  ppu.at_next_lo <- get_u8 ();
+  ppu.at_next_hi <- get_u8 ();
+  (* caches invalidate → 次 draw で再構築 *)
+  ppu.palette_cache_dirty <- true;
+  ppu.sprite_count <- 0
+
 (** Mirroring を動的に変更する. MMC1 等の bank-switching mapper が
     control register write 時に呼ぶ. *)
 let set_mirroring (ppu : t) (m : Rom.Cartridge.mirror) : unit =

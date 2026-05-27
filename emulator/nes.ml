@@ -15,6 +15,8 @@ type mapper_io =
   ; on_a12_rise : unit -> unit
   ; reset : unit -> unit (** Soft reset hook. *)
   ; sram : Bytes.t option (** battery-backed PRG-RAM ($6000-$7FFF). None なら non-battery. *)
+  ; serialize : Buffer.t -> unit
+  ; deserialize : Bytes.t -> int ref -> unit
   }
 
 (** カートリッジが挿さっていない時の状態。Open bus は実機では浮動値だが、 本実装では 0 で代用する。 *)
@@ -27,6 +29,8 @@ let empty_mapper : mapper_io =
   ; on_a12_rise = (fun () -> ())
   ; reset = (fun () -> ())
   ; sram = None
+  ; serialize = (fun _ -> ())
+  ; deserialize = (fun _ _ -> ())
   }
 
 type t =
@@ -99,6 +103,7 @@ let make_mapper
   let no_reset = fun () -> () in
   match cart.rom with
   | Rom.Cartridge.NROM { prg; chr } ->
+    let chr_is_ram = false in
     { read = (fun a -> if a < 0x8000 then 0 else prg_read_fixed prg a)
     ; write = (fun _ _ -> ())
     ; chr_read = chr_read_fixed chr
@@ -107,6 +112,8 @@ let make_mapper
     ; on_a12_rise = no_a12
     ; reset = no_reset
     ; sram = None
+    ; serialize = (fun buf -> if chr_is_ram then Buffer.add_bytes buf chr)
+    ; deserialize = (fun _ _ -> ())
     }
   | Rom.Cartridge.CNROM { prg; chr } ->
     let bank_size = 0x2000 in
@@ -123,6 +130,9 @@ let make_mapper
     ; on_a12_rise = no_a12
     ; reset = no_reset
     ; sram = None
+    ; serialize = (fun buf -> Buffer.add_char buf (Char.chr (!chr_bank land 0xFF)))
+    ; deserialize =
+        (fun b c -> chr_bank := Bytes.get_uint8 b !c; incr c)
     }
   | Rom.Cartridge.UNROM { prg; chr_ram } ->
     let bank_lo = ref 0 in
@@ -137,6 +147,15 @@ let make_mapper
     ; on_a12_rise = no_a12
     ; reset = no_reset
     ; sram = None
+    ; serialize =
+        (fun buf ->
+          Buffer.add_char buf (Char.chr (!bank_lo land 0xFF));
+          Buffer.add_bytes buf chr_ram)
+    ; deserialize =
+        (fun b c ->
+          bank_lo := Bytes.get_uint8 b !c; incr c;
+          let n = Bytes.length chr_ram in
+          Bytes.blit b !c chr_ram 0 n; c := !c + n)
     }
   | Rom.Cartridge.MMC1 { prg; chr; chr_is_ram } ->
     let m = Mapper.Mmc1.create ~prg ~chr ~chr_is_ram ~set_mirroring in
@@ -148,6 +167,8 @@ let make_mapper
     ; on_a12_rise = no_a12
     ; reset = (fun () -> Mapper.Mmc1.reset m)
     ; sram = Some (Mapper.Mmc1.prg_ram m)
+    ; serialize = (fun buf -> Mapper.Mmc1.serialize buf m)
+    ; deserialize = (fun b c -> Mapper.Mmc1.deserialize b c m)
     }
   | Rom.Cartridge.MMC3 { prg; chr; chr_is_ram } ->
     let m = Mapper.Mmc3.create ~prg ~chr ~chr_is_ram ~set_mirroring in
@@ -159,6 +180,8 @@ let make_mapper
     ; on_a12_rise = (fun () -> Mapper.Mmc3.on_a12_rise m)
     ; reset = (fun () -> Mapper.Mmc3.reset m)
     ; sram = Some (Mapper.Mmc3.prg_ram m)
+    ; serialize = (fun buf -> Mapper.Mmc3.serialize buf m)
+    ; deserialize = (fun b c -> Mapper.Mmc3.deserialize b c m)
     }
 
 (* ------------------------------------------------------------------ *)
@@ -369,6 +392,53 @@ let load_sram (nes : t) (b : Bytes.t) : bool =
     | Some target ->
       Bytes.blit b 0 target 0 0x2000;
       true
+
+(* ------------------------------------------------------------------ *)
+(* Quick save / load (state serialization)                             *)
+(*                                                                     *)
+(* Format: "FAMICAM1" magic (8B) + components 順に.                    *)
+(*   CPU / PPU / APU / Controller × 2 / WRAM (2KB) / Mapper.           *)
+(* CPU は instruction 境界でのみ save (closures が serialize 不可なので *)
+(* pending = [] まで進めてから save). *)
+(* ------------------------------------------------------------------ *)
+
+let save_magic = "FAMICAM1"
+
+let save_state (nes : t) : Bytes.t =
+  (* instruction 境界まで進める *)
+  if nes.cpu.pending <> []
+  then (
+    while nes.cpu.pending <> [] do
+      Cpu.tick nes.memory_bus nes.cpu
+    done);
+  let buf = Buffer.create (32 * 1024) in
+  Buffer.add_string buf save_magic;
+  Cpu.serialize buf nes.cpu;
+  Ppu.serialize buf nes.ppu;
+  Apu.serialize buf nes.apu;
+  Controller.serialize buf nes.controller1;
+  Controller.serialize buf nes.controller2;
+  (* WRAM 2KB *)
+  Buffer.add_bytes buf nes.wram;
+  (* Mapper *)
+  nes.mapper.serialize buf;
+  Buffer.to_bytes buf
+
+let load_state (nes : t) (b : Bytes.t) : bool =
+  if Bytes.length b < String.length save_magic then false
+  else if not (Bytes.sub_string b 0 (String.length save_magic) = save_magic)
+  then false
+  else (
+    let cursor = ref (String.length save_magic) in
+    Cpu.deserialize b cursor nes.cpu;
+    Ppu.deserialize b cursor nes.ppu;
+    Apu.deserialize b cursor nes.apu;
+    Controller.deserialize b cursor nes.controller1;
+    Controller.deserialize b cursor nes.controller2;
+    Bytes.blit b !cursor nes.wram 0 0x0800;
+    cursor := !cursor + 0x0800;
+    nes.mapper.deserialize b cursor;
+    true)
 
 (* ------------------------------------------------------------------ *)
 (* ロックステップ実行 (Phase A6)                                        *)

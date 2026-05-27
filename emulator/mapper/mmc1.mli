@@ -57,3 +57,6 @@ val reset : t -> unit
 
 (** 8KB PRG-RAM ($6000-$7FFF) への直接参照. battery-backed SRAM の load/save に. *)
 val prg_ram : t -> Bytes.t
+
+val serialize : Buffer.t -> t -> unit
+val deserialize : Bytes.t -> int ref -> t -> unit

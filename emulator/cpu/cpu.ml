@@ -1021,3 +1021,52 @@ let step_instruction (bus : Bus.t) (cpu : t) : int =
     tick bus cpu
   done;
   cpu.cycles - start
+
+(* ------------------------------------------------------------------ *)
+(* State serialization (quick save/load 用)                            *)
+(*                                                                     *)
+(* Precondition for save: pending = [] (closures が serialize 不可なので *)
+(* instruction 境界でのみ save 可能. 呼び出し側で step_instruction で   *)
+(* 完了まで進めてから save). *)
+(* ------------------------------------------------------------------ *)
+
+let serialize (buf : Buffer.t) (cpu : t) : unit =
+  Buffer.add_char buf (Char.chr (Uint16.to_int cpu.reg_PC land 0xFF));
+  Buffer.add_char buf (Char.chr ((Uint16.to_int cpu.reg_PC lsr 8) land 0xFF));
+  Buffer.add_char buf (Char.chr (Uint8.to_int cpu.reg_A));
+  Buffer.add_char buf (Char.chr (Uint8.to_int cpu.reg_X));
+  Buffer.add_char buf (Char.chr (Uint8.to_int cpu.reg_Y));
+  Buffer.add_char buf (Char.chr (Uint8.to_int (PS.to_uint8 cpu.reg_P)));
+  Buffer.add_char buf (Char.chr (Uint8.to_int cpu.reg_SP));
+  (* cycles を 8 byte little-endian (実用上 int 63bit を 8B にパック) *)
+  for i = 0 to 7 do
+    Buffer.add_char buf (Char.chr ((cpu.cycles lsr (i * 8)) land 0xFF))
+  done;
+  Buffer.add_char buf (if cpu.nmi_pending then '\x01' else '\x00');
+  Buffer.add_char buf (if cpu.irq_pending then '\x01' else '\x00');
+  Buffer.add_char buf (if cpu.reset_pending then '\x01' else '\x00');
+  Buffer.add_char buf (if cpu.irq_latch_a then '\x01' else '\x00');
+  Buffer.add_char buf (if cpu.irq_latch_b then '\x01' else '\x00')
+
+let deserialize (b : Bytes.t) (cursor : int ref) (cpu : t) : unit =
+  let get () = let v = Bytes.get_uint8 b !cursor in incr cursor; v in
+  let pc_lo = get () in
+  let pc_hi = get () in
+  cpu.reg_PC <- Uint16.of_int (pc_lo lor (pc_hi lsl 8));
+  cpu.reg_A <- Uint8.of_int (get ());
+  cpu.reg_X <- Uint8.of_int (get ());
+  cpu.reg_Y <- Uint8.of_int (get ());
+  cpu.reg_P <- PS.of_uint8 (Uint8.of_int (get ()));
+  cpu.reg_SP <- Uint8.of_int (get ());
+  let cyc = ref 0 in
+  for i = 0 to 7 do
+    cyc := !cyc lor (get () lsl (i * 8))
+  done;
+  cpu.cycles <- !cyc;
+  cpu.nmi_pending <- get () <> 0;
+  cpu.irq_pending <- get () <> 0;
+  cpu.reset_pending <- get () <> 0;
+  cpu.irq_latch_a <- get () <> 0;
+  cpu.irq_latch_b <- get () <> 0;
+  cpu.pending <- [];
+  cpu.opcode <- 0

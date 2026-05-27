@@ -105,3 +105,33 @@ let read (c : t) : int =
     c.shift <- c.shift lsr 1;
     c.read_count <- c.read_count + 1;
     bit)
+
+(* ------------------------------------------------------------------ *)
+(* Quick save/load 用 state serialization                              *)
+(* ------------------------------------------------------------------ *)
+
+let serialize (buf : Buffer.t) (c : t) : unit =
+  let bit b s = if b then 1 lsl s else 0 in
+  let btns =
+    bit c.a 0 lor bit c.b 1 lor bit c.select 2 lor bit c.start 3
+    lor bit c.up 4 lor bit c.down 5 lor bit c.left 6 lor bit c.right 7
+  in
+  Buffer.add_char buf (Char.chr btns);
+  Buffer.add_char buf (if c.strobe then '\x01' else '\x00');
+  Buffer.add_char buf (Char.chr (c.shift land 0xFF));
+  Buffer.add_char buf (Char.chr (c.read_count land 0xFF))
+
+let deserialize (b : Bytes.t) (cursor : int ref) (c : t) : unit =
+  let get () = let v = Bytes.get_uint8 b !cursor in incr cursor; v in
+  let btns = get () in
+  c.a <- btns land 1 <> 0;
+  c.b <- btns land 2 <> 0;
+  c.select <- btns land 4 <> 0;
+  c.start <- btns land 8 <> 0;
+  c.up <- btns land 0x10 <> 0;
+  c.down <- btns land 0x20 <> 0;
+  c.left <- btns land 0x40 <> 0;
+  c.right <- btns land 0x80 <> 0;
+  c.strobe <- get () <> 0;
+  c.shift <- get ();
+  c.read_count <- get ()

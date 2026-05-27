@@ -52,3 +52,7 @@ val write_strobe : t -> int -> unit
     strobe low 中は latch されたシフトレジスタから順に取り出す.
     9 回目以降は 1 を返す. *)
 val read : t -> int
+
+(** Quick save/load: 4 byte (buttons / strobe / shift / read_count). *)
+val serialize : Buffer.t -> t -> unit
+val deserialize : Bytes.t -> int ref -> t -> unit

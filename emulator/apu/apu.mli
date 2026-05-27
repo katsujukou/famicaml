@@ -34,6 +34,11 @@ val irq_pending : t -> bool
     IRQ clear + cycle reset. frame counter mode/inhibit は preserved. *)
 val reset : t -> unit
 
+(** State serialize. sample buffer (transient) は skip. *)
+val serialize : Buffer.t -> t -> unit
+
+val deserialize : Bytes.t -> int ref -> t -> unit
+
 (** {1 Audio output (Phase D1B)}
 
     APU は per-CPU-cycle で実機の non-linear mixer 出力を計算し、

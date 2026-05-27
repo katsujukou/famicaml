@@ -28,7 +28,38 @@ type fileList
 type keyboardEvent
 @get external keyEventCode: keyboardEvent => string = "code"
 @get external keyEventRepeat: keyboardEvent => bool = "repeat"
+@get external keyEventCtrl: keyboardEvent => bool = "ctrlKey"
+@get external keyEventMeta: keyboardEvent => bool = "metaKey"
+@get external keyEventShift: keyboardEvent => bool = "shiftKey"
 @send external keyEventPreventDefault: keyboardEvent => unit = "preventDefault"
+
+/* localStorage bindings; state stored as base64 string. */
+@val @scope(("globalThis", "localStorage")) external lsGet: string => Nullable.t<string> = "getItem"
+@val @scope(("globalThis", "localStorage")) external lsSet: (string, string) => unit = "setItem"
+@val @scope(("globalThis", "localStorage")) external lsRemove: string => unit = "removeItem"
+
+/* Uint8Array <-> base64 (8KB chunked for btoa argument length limit). */
+let uint8ArrayToBase64: uint8Array => string = %raw(`
+  function(arr) {
+    var binary = '';
+    var len = arr.byteLength;
+    var chunk = 0x8000;
+    for (var i = 0; i < len; i += chunk) {
+      binary += String.fromCharCode.apply(null, arr.subarray(i, Math.min(i + chunk, len)));
+    }
+    return btoa(binary);
+  }
+`)
+
+let base64ToUint8Array: string => uint8Array = %raw(`
+  function(s) {
+    var bin = atob(s);
+    var n = bin.length;
+    var arr = new Uint8Array(n);
+    for (var i = 0; i < n; i++) arr[i] = bin.charCodeAt(i);
+    return arr;
+  }
+`)
 
 @val @scope("window")
 external windowAddKeyListener: (string, keyboardEvent => unit) => unit = "addEventListener"
@@ -151,6 +182,8 @@ type famiCamlApi = {
   hasSram: unit => bool,
   loadSram: uint8Array => bool,
   saveSram: unit => Nullable.t<uint8Array>,
+  saveState: unit => uint8Array,
+  loadState: uint8Array => bool,
   eject: unit => unit,
   reset: unit => unit,
   powerOn: unit => unit,
@@ -396,6 +429,9 @@ module App = {
     let (speedMul, setSpeedMul) = React.useState(() => 1.0)
     let speedMulRef = React.useRef(1.0)
     let speedAccumRef = React.useRef(0.0)
+    let (saveSlot, setSaveSlot) = React.useState(() => 0)
+    let saveSlotRef = React.useRef(0)
+    let (saveMsg, setSaveMsg) = React.useState(() => "")
     let runningRef = React.useRef(false)
     /* Audio: AudioContext + AudioWorklet は user gesture (= 初回 Power ON) が
        必要なので lazy 初期化. None = まだ作っていない. */
@@ -743,6 +779,33 @@ module App = {
     }
     let onReset = _ => withApi(api => api.reset())
 
+    /* Quick save / load. localStorage に slot ごとに base64 で保存. */
+    let quickSaveKey = slot => "famicaml-save-slot-" ++ Int.toString(slot)
+    let quickSave = (slot: int) =>
+      switch Nullable.toOption(famiCaml) {
+      | Some(api) =>
+        let arr = api.saveState()
+        let b64 = uint8ArrayToBase64(arr)
+        lsSet(quickSaveKey(slot), b64)
+        setSaveMsg(_ => "Saved slot " ++ Int.toString(slot))
+      | None => ()
+      }
+    let quickLoad = (slot: int) =>
+      switch Nullable.toOption(famiCaml) {
+      | Some(api) =>
+        switch Nullable.toOption(lsGet(quickSaveKey(slot))) {
+        | Some(b64) =>
+          let arr = base64ToUint8Array(b64)
+          if api.loadState(arr) {
+            setSaveMsg(_ => "Loaded slot " ++ Int.toString(slot))
+          } else {
+            setSaveMsg(_ => "Load failed (corrupt save?)")
+          }
+        | None => setSaveMsg(_ => "Slot " ++ Int.toString(slot) ++ " is empty")
+        }
+      | None => ()
+      }
+
     let onRun = _ => startRun ()
     let onStop = _ => stopRun ()
     let onStep = _ =>
@@ -763,20 +826,34 @@ module App = {
        keymap は ref で保持し、将来 UI から再設定できる構造にしておく. */
     let keymapRef = React.useRef(defaultKeymap())
     React.useEffect0(() => {
-      let onKeyDown = e =>
-        switch Map.get(keymapRef.current, keyEventCode(e)) {
-        | Some(b) =>
-          /* matched なら repeat でも必ず preventDefault.
-             (repeat キーで Arrow による scroll が走るのを防ぐ) */
+      let onKeyDown = e => {
+        let code = keyEventCode(e)
+        let ctrl = keyEventCtrl(e) || keyEventMeta(e)
+        /* Ctrl+S = quick save / Ctrl+L = quick load (current slot). */
+        if ctrl && code == "KeyS" {
           keyEventPreventDefault(e)
           if !keyEventRepeat(e) {
-            switch Nullable.toOption(famiCaml) {
-            | Some(api) => api.setButton(b.player, b.button, true)
-            | None => ()
-            }
+            quickSave(saveSlotRef.current)
           }
-        | None => ()
+        } else if ctrl && code == "KeyL" {
+          keyEventPreventDefault(e)
+          if !keyEventRepeat(e) {
+            quickLoad(saveSlotRef.current)
+          }
+        } else {
+          switch Map.get(keymapRef.current, code) {
+          | Some(b) =>
+            keyEventPreventDefault(e)
+            if !keyEventRepeat(e) {
+              switch Nullable.toOption(famiCaml) {
+              | Some(api) => api.setButton(b.player, b.button, true)
+              | None => ()
+              }
+            }
+          | None => ()
+          }
         }
+      }
       let onKeyUp = e =>
         switch Map.get(keymapRef.current, keyEventCode(e)) {
         | Some(b) =>
@@ -1079,6 +1156,35 @@ module App = {
             {React.string("Reset")}
           </button>
         </label>
+      </section>
+      <section style={{marginTop: "0.5rem", display: "flex", alignItems: "center", gap: "0.5rem", fontSize: "0.9rem"}}>
+        <span style={{color: "#666"}}> {React.string("Save slot:")} </span>
+        <select
+          value={Int.toString(saveSlot)}
+          onChange={event => {
+            let target = ReactEvent.Form.target(event)
+            let v: string = target["value"]
+            let n = Int.fromString(v)->Option.getOr(0)
+            setSaveSlot(_ => n)
+            saveSlotRef.current = n
+          }}>
+          {React.array(Belt.Array.range(0, 3)->Belt.Array.map(i =>
+            <option key={Int.toString(i)} value={Int.toString(i)}>
+              {React.string(Int.toString(i))}
+            </option>
+          ))}
+        </select>
+        <button onClick={_ => quickSave(saveSlot)} style=buttonStyle title="Ctrl+S">
+          {React.string("Save (Ctrl+S)")}
+        </button>
+        <button onClick={_ => quickLoad(saveSlot)} style=buttonStyle title="Ctrl+L">
+          {React.string("Load (Ctrl+L)")}
+        </button>
+        {saveMsg == ""
+          ? React.null
+          : <span style={{color: "#080", fontFamily: "monospace"}}>
+              {React.string(saveMsg)}
+            </span>}
       </section>
       {switch lastError {
       | Some(msg) =>

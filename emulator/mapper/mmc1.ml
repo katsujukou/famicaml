@@ -69,6 +69,26 @@ let reset (_t : t) : unit = ()
 (** 8KB PRG-RAM ($6000-$7FFF) への直接参照. SRAM load/save 用. *)
 let prg_ram (t : t) : Bytes.t = t.prg_ram
 
+(* Quick save/load 用 serialize. chr_is_ram の場合は chr も含める. *)
+let serialize (buf : Buffer.t) (t : t) : unit =
+  let put_u8 v = Buffer.add_char buf (Char.chr (v land 0xFF)) in
+  put_u8 t.shift; put_u8 t.shift_count; put_u8 t.control;
+  put_u8 t.chr0; put_u8 t.chr1; put_u8 t.prg_bank;
+  put_u8 (if t.prg_ram_enable then 1 else 0);
+  Buffer.add_bytes buf t.prg_ram;
+  if t.chr_is_ram then Buffer.add_bytes buf t.chr
+
+let deserialize (b : Bytes.t) (cursor : int ref) (t : t) : unit =
+  let get () = let v = Bytes.get_uint8 b !cursor in incr cursor; v in
+  t.shift <- get (); t.shift_count <- get (); t.control <- get ();
+  t.chr0 <- get (); t.chr1 <- get (); t.prg_bank <- get ();
+  t.prg_ram_enable <- get () <> 0;
+  Bytes.blit b !cursor t.prg_ram 0 0x2000; cursor := !cursor + 0x2000;
+  if t.chr_is_ram then (
+    let n = Bytes.length t.chr in
+    Bytes.blit b !cursor t.chr 0 n; cursor := !cursor + n);
+  apply_control t (* mirroring 再 apply *)
+
 (** 5 回目の write で確定した value を target register に書き込む.
     target は最後の write address の bits 14-13 で決定. *)
 let apply_register t addr value =

@@ -97,3 +97,9 @@ val request_irq : t -> unit
 
     [request_reset] は他の割り込みより高い優先度を持つ。 *)
 val request_reset : t -> unit
+
+(** State serialize. precondition: pending = [] (= instruction 境界). *)
+val serialize : Buffer.t -> t -> unit
+
+(** State deserialize. cursor は Bytes 内の現在位置. pending は [] にリセット. *)
+val deserialize : Bytes.t -> int ref -> t -> unit

@@ -270,6 +270,15 @@ let save_sram () =
   | None -> Js.null
   | Some b -> Js.some (uint8array_of_bytes b)
 
+(* Quick save/load: 状態全体を Uint8Array で受け渡す. *)
+let save_state () : Typed_array.uint8Array Js.t =
+  let b = Nes.save_state nes in
+  uint8array_of_bytes b
+
+let load_state (arr : Typed_array.uint8Array Js.t) : bool Js.t =
+  let b = bytes_of_uint8array arr in
+  if Nes.load_state nes b then Js._true else Js._false
+
 let () = Printexc.record_backtrace true
 
 let () =
@@ -280,6 +289,8 @@ let () =
        val hasSram = Js.wrap_callback has_sram
        val loadSram = Js.wrap_callback load_sram
        val saveSram = Js.wrap_callback save_sram
+       val saveState = Js.wrap_callback save_state
+       val loadState = Js.wrap_callback load_state
        val eject = Js.wrap_callback (fun () -> Nes.eject nes)
        val reset = Js.wrap_callback reset_safe
        val powerOn = Js.wrap_callback power_on_safe

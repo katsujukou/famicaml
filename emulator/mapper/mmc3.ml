@@ -229,3 +229,35 @@ let reset (_t : t) : unit = ()
 
 (** 8KB PRG-RAM ($6000-$7FFF) への直接参照. SRAM load/save 用. *)
 let prg_ram (t : t) : Bytes.t = t.prg_ram
+
+(* Quick save/load 用 serialize. chr_is_ram の場合は chr 内容も含める. *)
+let serialize (buf : Buffer.t) (t : t) : unit =
+  let put_u8 v = Buffer.add_char buf (Char.chr (v land 0xFF)) in
+  let put_u16 v = put_u8 v; put_u8 (v lsr 8) in
+  put_u8 t.bank_select; put_u8 t.prg_mode;
+  put_u8 (if t.chr_inv then 1 else 0);
+  for i = 0 to 7 do put_u8 t.r.(i) done;
+  put_u8 (if t.prg_ram_enable then 1 else 0);
+  put_u8 (if t.prg_ram_write_protect then 1 else 0);
+  put_u16 t.irq_latch; put_u16 t.irq_counter;
+  put_u8 (if t.irq_reload then 1 else 0);
+  put_u8 (if t.irq_enable then 1 else 0);
+  put_u8 (if t.irq_flag then 1 else 0);
+  Buffer.add_bytes buf t.prg_ram;
+  if t.chr_is_ram then Buffer.add_bytes buf t.chr
+
+let deserialize (b : Bytes.t) (cursor : int ref) (t : t) : unit =
+  let get () = let v = Bytes.get_uint8 b !cursor in incr cursor; v in
+  let get_u16 () = let lo = get () in let hi = get () in lo lor (hi lsl 8) in
+  t.bank_select <- get (); t.prg_mode <- get ();
+  t.chr_inv <- get () <> 0;
+  for i = 0 to 7 do t.r.(i) <- get () done;
+  t.prg_ram_enable <- get () <> 0;
+  t.prg_ram_write_protect <- get () <> 0;
+  t.irq_latch <- get_u16 (); t.irq_counter <- get_u16 ();
+  t.irq_reload <- get () <> 0; t.irq_enable <- get () <> 0;
+  t.irq_flag <- get () <> 0;
+  Bytes.blit b !cursor t.prg_ram 0 0x2000; cursor := !cursor + 0x2000;
+  if t.chr_is_ram then (
+    let n = Bytes.length t.chr in
+    Bytes.blit b !cursor t.chr 0 n; cursor := !cursor + n)

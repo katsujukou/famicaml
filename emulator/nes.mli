@@ -55,6 +55,14 @@ val sram : t -> Bytes.t option
     サイズ不正 (≠ 8192) や SRAM 無しなら false. *)
 val load_sram : t -> Bytes.t -> bool
 
+(** State quick save. 全 component (CPU/PPU/APU/Controller/WRAM/Mapper) を
+    bytes に serialize. CPU を instruction 境界まで進めてから save する. *)
+val save_state : t -> Bytes.t
+
+(** State quick load. bytes を deserialize して各 component に反映.
+    magic 不一致や parse 失敗で false. *)
+val load_state : t -> Bytes.t -> bool
+
 (** 1 CPU cycle 進める (= PPU 3 dot 進む)。PPU が vblank で nmi_request を
     立てた場合は CPU に転写する. *)
 val tick : t -> unit
