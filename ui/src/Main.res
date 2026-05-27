@@ -102,6 +102,15 @@ external audioWorkletNodeConnect: (audioWorkletNode, audioDestination) => unit =
 @get external audioWorkletNodePort: audioWorkletNode => messagePort = "port"
 @send external messagePortPostMessage: (messagePort, float32Array) => unit = "postMessage"
 
+/* GainNode (volume control). */
+type gainNode
+type audioParam
+@send external audioContextCreateGain: audioContext => gainNode = "createGain"
+@get external gainNodeGain: gainNode => audioParam = "gain"
+@set external audioParamSetValue: (audioParam, float) => unit = "value"
+@send external audioWorkletConnectGain: (audioWorkletNode, gainNode) => unit = "connect"
+@send external gainConnectDestination: (gainNode, audioDestination) => unit = "connect"
+
 @get external targetFiles: {..} => Nullable.t<fileList> = "files"
 
 /* ---- Canvas / ImageData バインディング ---- */
@@ -437,7 +446,10 @@ module App = {
        必要なので lazy 初期化. None = まだ作っていない. */
     let audioCtxRef = React.useRef((None: option<audioContext>))
     let audioNodeRef = React.useRef((None: option<audioWorkletNode>))
+    let audioGainRef = React.useRef((None: option<gainNode>))
     let audioReadyRef = React.useRef(false)
+    let (volume, setVolume) = React.useState(() => 1.0)
+    let (muted, setMuted) = React.useState(() => false)
     let rafIdRef = React.useRef(None)
     let lastFrameTimeRef = React.useRef(0.0)
     let frameCountRef = React.useRef(0)
@@ -629,8 +641,13 @@ module App = {
         audioWorkletAddModule(audioContextWorklet(ctx), "/famicaml-audio-processor.js")
         ->Promise.thenResolve(() => {
           let node = newAudioWorkletNode(ctx, "famicaml-audio")
-          audioWorkletNodeConnect(node, audioContextDestination(ctx))
+          let gain = audioContextCreateGain(ctx)
+          let initial = muted ? 0.0 : volume
+          audioParamSetValue(gainNodeGain(gain), initial)
+          audioWorkletConnectGain(node, gain)
+          gainConnectDestination(gain, audioContextDestination(ctx))
           audioNodeRef.current = Some(node)
+          audioGainRef.current = Some(gain)
           audioReadyRef.current = true
         })
         ->Promise.catch(err => {
@@ -778,6 +795,27 @@ module App = {
       }
     }
     let onReset = _ => withApi(api => api.reset())
+
+    /* GainNode の volume を更新するヘルパー. mute 時は強制 0. */
+    let applyGain = (vol, isMuted) =>
+      switch audioGainRef.current {
+      | Some(g) =>
+        audioParamSetValue(gainNodeGain(g), isMuted ? 0.0 : vol)
+      | None => ()
+      }
+    let onVolumeChange = (event: ReactEvent.Form.t) => {
+      let target = ReactEvent.Form.target(event)
+      let v: string = target["value"]
+      let pct = Float.fromString(v)->Option.getOr(100.0)
+      let vol = pct /. 100.0
+      setVolume(_ => vol)
+      applyGain(vol, muted)
+    }
+    let onMuteToggle = _ => {
+      let next = !muted
+      setMuted(_ => next)
+      applyGain(volume, next)
+    }
 
     /* Quick save / load. localStorage に slot ごとに base64 で保存. */
     let quickSaveKey = slot => "famicaml-save-slot-" ++ Int.toString(slot)
@@ -1185,6 +1223,25 @@ module App = {
           : <span style={{color: "#080", fontFamily: "monospace"}}>
               {React.string(saveMsg)}
             </span>}
+      </section>
+      <section style={{marginTop: "0.5rem", display: "flex", alignItems: "center", gap: "0.5rem", fontSize: "0.9rem"}}>
+        <span style={{color: "#666"}}> {React.string("Volume:")} </span>
+        <input
+          type_="range"
+          min="0"
+          max="200"
+          step={1.0}
+          value={Float.toString(volume *. 100.0)}
+          onChange={onVolumeChange}
+          disabled={muted}
+          style={{width: "150px"}}
+        />
+        <span style={{fontFamily: "monospace", color: "#666", minWidth: "50px"}}>
+          {React.string(Float.toFixed(volume *. 100.0, ~digits=0) ++ "%")}
+        </span>
+        <button onClick=onMuteToggle style=buttonStyle>
+          {React.string(muted ? "🔇 Unmute" : "🔊 Mute")}
+        </button>
       </section>
       {switch lastError {
       | Some(msg) =>
