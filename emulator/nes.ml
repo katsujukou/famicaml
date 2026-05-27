@@ -328,6 +328,13 @@ let reset (nes : t) =
   Ppu.reset nes.ppu;
   Apu.reset nes.apu;
   nes.mapper.reset ();
+  (* CPU interrupt latches を clean state に. 前カートの state が残ると
+     新カート起動時に挙動が変わる (Rockman 5 ステセレで観測). *)
+  nes.cpu.nmi_pending <- false;
+  nes.cpu.irq_pending <- false;
+  nes.cpu.irq_latch_a <- false;
+  nes.cpu.irq_latch_b <- false;
+  nes.cpu.pending <- [];
   refresh_vectors nes;
   Cpu.request_reset nes.cpu;
   let _ : int = Cpu.step_instruction nes.memory_bus nes.cpu in
