@@ -95,9 +95,10 @@ let test_no_v_update_when_rendering_off () =
 let test_sprite_overflow_when_more_than_8_in_range () =
   let ppu = make_ppu_with_chr ~chr_io:(empty_chr_io ()) () in
   ppu.mask <- { ppu.mask with enable_bg = true; enable_sprite = true };
-  (* OAM: 9 sprite を y = 20 に配置 (8x8 mode → scanline 20..27 で in range) *)
+  (* OAM Y=19 ("top scanline -1" 規約) → 実際の top=20、scanline 20..27 で
+     in range. 9 sprite 同一行に置いて overflow を発生させる. *)
   for i = 0 to 8 do
-    Bytes.set_uint8 ppu.oam (i * 4) 20;
+    Bytes.set_uint8 ppu.oam (i * 4) 19;
     Bytes.set_uint8 ppu.oam ((i * 4) + 1) 0;
     Bytes.set_uint8 ppu.oam ((i * 4) + 2) 0;
     Bytes.set_uint8 ppu.oam ((i * 4) + 3) (i * 8)
@@ -112,7 +113,7 @@ let test_no_overflow_when_8_or_fewer () =
   let ppu = make_ppu_with_chr ~chr_io:(empty_chr_io ()) () in
   ppu.mask <- { ppu.mask with enable_bg = true; enable_sprite = true };
   for i = 0 to 7 do
-    Bytes.set_uint8 ppu.oam (i * 4) 20;
+    Bytes.set_uint8 ppu.oam (i * 4) 19;
     Bytes.set_uint8 ppu.oam ((i * 4) + 1) 0;
     Bytes.set_uint8 ppu.oam ((i * 4) + 2) 0;
     Bytes.set_uint8 ppu.oam ((i * 4) + 3) (i * 8)

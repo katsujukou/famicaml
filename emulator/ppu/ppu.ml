@@ -1085,7 +1085,10 @@ let evaluate_sprites_for (ppu : t) ~(next_sl : int) : unit =
   while !i < 64 && not !overflow do
     let base = !i * 4 in
     let y = Char.code (Bytes.unsafe_get ppu.oam base) in
-    if next_sl >= y && next_sl < y + height
+    (* NESdev: OAM byte 0 = "top scanline - 1". 実際の top = y + 1.
+       sprite が描画される scanline 範囲: y+1 .. y+height (= next_sl > y &&
+       next_sl <= y + height). fine_y は next_sl - (y + 1). *)
+    if next_sl > y && next_sl <= y + height
     then
       if ppu.sprite_count < 8
       then (
@@ -1094,7 +1097,7 @@ let evaluate_sprites_for (ppu : t) ~(next_sl : int) : unit =
         let attr = Char.code (Bytes.unsafe_get ppu.oam (base + 2)) in
         let x = Char.code (Bytes.unsafe_get ppu.oam (base + 3)) in
         let flip_v = attr land 0x80 <> 0 in
-        let fy = next_sl - y in
+        let fy = next_sl - y - 1 in
         let fy = if flip_v then height - 1 - fy else fy in
         let chr_ofs = sprite_pat_addr ppu ~tile_byte:tile ~fine_y:fy in
         let pat_lo = Uint8.to_int (ppu.chr_io.chr_read chr_ofs) in
