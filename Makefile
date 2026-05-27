@@ -1,4 +1,4 @@
-.PHONY: wasm wasm-copy ui-install ui-dev ui-build clean
+.PHONY: wasm wasm-copy ui-install ui-dev ui-build ui-fmt ui-fmt-check clean
 
 wasm:
 	dune build wasm/
@@ -18,6 +18,12 @@ ui-dev: wasm-copy
 
 ui-build: wasm-copy
 	cd ui && pnpm run build
+
+ui-fmt:
+	cd ui && pnpm exec rescript format
+
+ui-fmt-check:
+	cd ui && pnpm exec rescript format -c
 
 clean:
 	dune clean

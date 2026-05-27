@@ -5,6 +5,9 @@ lib/
 # rescript の中間ファイル
 src/**/*.res.js
 src/**/*.res.mjs
+src/**/*.cmt
+src/**/*.cmi
+src/**/*.cmj
 
 # wasm コピー先(ビルド成果物なので追跡しない)
 public/wasm/

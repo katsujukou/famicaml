@@ -99,6 +99,10 @@ jobs:
         working-directory: ui
         run: nix develop --command pnpm install --frozen-lockfile
 
+      # ReScript フォーマットチェック。差分があれば exit 1。
+      - name: ReScript format check
+        run: nix develop --command make ui-fmt-check
+
       # UI テストはまだ無いので skip。pnpm test が定義され次第有効化:
       # - name: UI tests
       #   working-directory: ui
