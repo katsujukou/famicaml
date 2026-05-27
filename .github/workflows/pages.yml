@@ -1,0 +1,99 @@
+# FamiCaml — GitHub Pages deploy
+#
+# main push のたびに ui/dist/ を https://famicaml.kotolab.net/ にデプロイ。
+#
+# Repo 設定:
+#   Settings → Pages → Build and deployment → Source = "GitHub Actions"
+#   Custom domain = famicaml.kotolab.net (CNAME ファイルから自動検出)
+#
+# DNS:
+#   famicaml.kotolab.net  CNAME  katsujukou.github.io.
+
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# 同時に複数 deploy が走らないように。in-progress は cancel しない (途中で
+# 中断すると Pages 側が中途半端な状態になりうるため最後まで走らせる)。
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+env:
+  FAMICAML_QUIET: "1"
+
+jobs:
+  build:
+    name: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@v17
+        with:
+          extra-conf: |
+            experimental-features = nix-command flakes
+            accept-flake-config = true
+
+      - name: Set up magic-nix-cache
+        uses: DeterminateSystems/magic-nix-cache-action@v8
+
+      - name: Set up Cachix
+        uses: cachix/cachix-action@v15
+        with:
+          name: famicaml
+          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+
+      - name: Warm up devShell
+        run: nix develop --command true
+
+      - name: Build wasm + copy into ui/public
+        run: nix develop --command make wasm-copy
+
+      - name: Resolve pnpm store path
+        id: pnpm-store
+        run: |
+          STORE_PATH="$(nix develop --command pnpm store path 2>/dev/null | tail -n 1)"
+          echo "path=$STORE_PATH" >> "$GITHUB_OUTPUT"
+
+      - name: Cache pnpm store
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: pnpm-${{ runner.os }}-${{ hashFiles('ui/pnpm-lock.yaml') }}
+          restore-keys: |
+            pnpm-${{ runner.os }}-
+
+      - name: UI dependencies (pnpm install)
+        working-directory: ui
+        run: nix develop --command pnpm install --frozen-lockfile
+
+      - name: UI build
+        run: nix develop --command make ui-build
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: ui/dist
+
+  deploy:
+    name: deploy
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
