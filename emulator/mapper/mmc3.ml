@@ -226,3 +226,6 @@ let irq_pending t = t.irq_flag
     IRQ enable/flag、counter、PRG/CHR bank、mirroring は CPU RESET 信号で
     影響を受けない. ゲーム自身が $E000 等で制御. *)
 let reset (_t : t) : unit = ()
+
+(** 8KB PRG-RAM ($6000-$7FFF) への直接参照. SRAM load/save 用. *)
+let prg_ram (t : t) : Bytes.t = t.prg_ram

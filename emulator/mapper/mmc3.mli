@@ -46,5 +46,8 @@ val on_a12_rise : t -> unit
 (** IRQ pin が low (= active) かどうか. level-triggered. *)
 val irq_pending : t -> bool
 
-(** Soft reset. IRQ enable/flag を off に. *)
+(** Soft reset. NESdev / Mesen 準拠: no-op. *)
 val reset : t -> unit
+
+(** 8KB PRG-RAM ($6000-$7FFF) への直接参照. battery-backed SRAM の load/save に. *)
+val prg_ram : t -> Bytes.t

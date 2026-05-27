@@ -47,6 +47,14 @@ val power_on : t -> unit
 (** 電源を切る。本モデルでは WRAM はモジュールが解放されるまで残る (現実の SRAM は短時間ならデータを保持するという挙動の近似)。 *)
 val power_off : t -> unit
 
+(** 現在の cart の battery-backed SRAM ($6000-$7FFF, 8KB) への直接参照を返す.
+    SRAM を持たない mapper (NROM/CNROM/UNROM) は None. *)
+val sram : t -> Bytes.t option
+
+(** 提供された 8KB SRAM bytes を cart の prg_ram に書き込む (in-place).
+    サイズ不正 (≠ 8192) や SRAM 無しなら false. *)
+val load_sram : t -> Bytes.t -> bool
+
 (** 1 CPU cycle 進める (= PPU 3 dot 進む)。PPU が vblank で nmi_request を
     立てた場合は CPU に転写する. *)
 val tick : t -> unit

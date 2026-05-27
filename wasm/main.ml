@@ -254,6 +254,22 @@ let load_rom (arr : Typed_array.uint8Array Js.t) =
       val error = Js.some (Js.string (Ines.error_to_string e))
     end
 
+(* battery-backed SRAM の load/save. UI から呼ぶ.
+   has_sram は cart info ベース (mapper が prg_ram を持っているか). *)
+let has_sram () : bool Js.t =
+  match Nes.sram nes with
+  | Some _ -> Js._true
+  | None -> Js._false
+
+let load_sram (arr : Typed_array.uint8Array Js.t) : bool Js.t =
+  let b = bytes_of_uint8array arr in
+  if Nes.load_sram nes b then Js._true else Js._false
+
+let save_sram () =
+  match Nes.sram nes with
+  | None -> Js.null
+  | Some b -> Js.some (uint8array_of_bytes b)
+
 let () = Printexc.record_backtrace true
 
 let () =
@@ -261,6 +277,9 @@ let () =
     "FamiCaml"
     (object%js
        val loadRom = Js.wrap_callback load_rom
+       val hasSram = Js.wrap_callback has_sram
+       val loadSram = Js.wrap_callback load_sram
+       val saveSram = Js.wrap_callback save_sram
        val eject = Js.wrap_callback (fun () -> Nes.eject nes)
        val reset = Js.wrap_callback reset_safe
        val powerOn = Js.wrap_callback power_on_safe

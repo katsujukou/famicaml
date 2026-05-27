@@ -13,7 +13,8 @@ type mapper_io =
   ; chr_write : int -> uint8 -> unit
   ; irq_pending : unit -> bool
   ; on_a12_rise : unit -> unit
-  ; reset : unit -> unit (** Soft reset hook. MMC1: shift register reset, MMC3: IRQ off, etc. *)
+  ; reset : unit -> unit (** Soft reset hook. *)
+  ; sram : Bytes.t option (** battery-backed PRG-RAM ($6000-$7FFF). None なら non-battery. *)
   }
 
 (** カートリッジが挿さっていない時の状態。Open bus は実機では浮動値だが、 本実装では 0 で代用する。 *)
@@ -25,6 +26,7 @@ let empty_mapper : mapper_io =
   ; irq_pending = (fun () -> false)
   ; on_a12_rise = (fun () -> ())
   ; reset = (fun () -> ())
+  ; sram = None
   }
 
 type t =
@@ -104,6 +106,7 @@ let make_mapper
     ; irq_pending = no_irq
     ; on_a12_rise = no_a12
     ; reset = no_reset
+    ; sram = None
     }
   | Rom.Cartridge.CNROM { prg; chr } ->
     let bank_size = 0x2000 in
@@ -119,6 +122,7 @@ let make_mapper
     ; irq_pending = no_irq
     ; on_a12_rise = no_a12
     ; reset = no_reset
+    ; sram = None
     }
   | Rom.Cartridge.UNROM { prg; chr_ram } ->
     let bank_lo = ref 0 in
@@ -132,6 +136,7 @@ let make_mapper
     ; irq_pending = no_irq
     ; on_a12_rise = no_a12
     ; reset = no_reset
+    ; sram = None
     }
   | Rom.Cartridge.MMC1 { prg; chr; chr_is_ram } ->
     let m = Mapper.Mmc1.create ~prg ~chr ~chr_is_ram ~set_mirroring in
@@ -142,6 +147,7 @@ let make_mapper
     ; irq_pending = no_irq
     ; on_a12_rise = no_a12
     ; reset = (fun () -> Mapper.Mmc1.reset m)
+    ; sram = Some (Mapper.Mmc1.prg_ram m)
     }
   | Rom.Cartridge.MMC3 { prg; chr; chr_is_ram } ->
     let m = Mapper.Mmc3.create ~prg ~chr ~chr_is_ram ~set_mirroring in
@@ -152,6 +158,7 @@ let make_mapper
     ; irq_pending = (fun () -> Mapper.Mmc3.irq_pending m)
     ; on_a12_rise = (fun () -> Mapper.Mmc3.on_a12_rise m)
     ; reset = (fun () -> Mapper.Mmc3.reset m)
+    ; sram = Some (Mapper.Mmc3.prg_ram m)
     }
 
 (* ------------------------------------------------------------------ *)
@@ -345,6 +352,23 @@ let power_on (nes : t) =
   reset nes
 
 let power_off (nes : t) = nes.power <- false
+
+(** 現在の cart の battery-backed SRAM ($6000-$7FFF, 8KB) への参照を返す.
+    SRAM を持たない mapper (NROM/CNROM/UNROM) は None.
+    has_battery flag は別途 cart.spec.has_battery で判定する. *)
+let sram (nes : t) : Bytes.t option = nes.mapper.sram
+
+(** 提供された 8KB SRAM bytes を cart の prg_ram に書き込む (in-place).
+    サイズ不正 (≠ 8192) や cart なし/SRAM 無しなら false. *)
+let load_sram (nes : t) (b : Bytes.t) : bool =
+  if Bytes.length b <> 0x2000
+  then false
+  else
+    match nes.mapper.sram with
+    | None -> false
+    | Some target ->
+      Bytes.blit b 0 target 0 0x2000;
+      true
 
 (* ------------------------------------------------------------------ *)
 (* ロックステップ実行 (Phase A6)                                        *)

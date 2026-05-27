@@ -66,6 +66,9 @@ let reset_shift t =
     (= ゲーム自身の制御). CPU の RESET 信号では mapper は影響を受けない. *)
 let reset (_t : t) : unit = ()
 
+(** 8KB PRG-RAM ($6000-$7FFF) への直接参照. SRAM load/save 用. *)
+let prg_ram (t : t) : Bytes.t = t.prg_ram
+
 (** 5 回目の write で確定した value を target register に書き込む.
     target は最後の write address の bits 14-13 で決定. *)
 let apply_register t addr value =

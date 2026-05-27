@@ -52,6 +52,8 @@ val chr_read : t -> int -> Famicaml_common.Nesint.uint8
 (** PPU bus への write. CHR-RAM のみ有効、CHR-ROM では無視. *)
 val chr_write : t -> int -> Famicaml_common.Nesint.uint8 -> unit
 
-(** Soft reset (= write $80 to $8000 と同等). shift register + control を
-    起動時状態 (PRG mode 3) に戻す. CHR/PRG bank は保持. *)
+(** Soft reset. NESdev / Mesen 準拠: no-op (mapper は CPU RESET 影響を受けない). *)
 val reset : t -> unit
+
+(** 8KB PRG-RAM ($6000-$7FFF) への直接参照. battery-backed SRAM の load/save に. *)
+val prg_ram : t -> Bytes.t

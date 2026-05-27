@@ -148,6 +148,9 @@ type patternImage = {
 
 type famiCamlApi = {
   loadRom: uint8Array => loadResult,
+  hasSram: unit => bool,
+  loadSram: uint8Array => bool,
+  saveSram: unit => Nullable.t<uint8Array>,
   eject: unit => unit,
   reset: unit => unit,
   powerOn: unit => unit,
@@ -371,6 +374,7 @@ module App = {
     let canvasRight = React.useRef(Nullable.null)
     let canvasNes = React.useRef(Nullable.null)
     let romFileInput = React.useRef(Nullable.null)
+    let sramFileInput = React.useRef(Nullable.null)
 
     /* Palette 状態。wasm 側の真値をミラーする。
        UI からの編集はまず wasm を呼んでから state に reflect する. */
@@ -388,6 +392,10 @@ module App = {
     let (showCode, setShowCode) = React.useState(() => false)
     let (running, setRunning) = React.useState(() => false)
     let (fps, setFps) = React.useState(() => 0.0)
+    let (hideOverscan, setHideOverscan) = React.useState(() => false)
+    let (speedMul, setSpeedMul) = React.useState(() => 1.0)
+    let speedMulRef = React.useRef(1.0)
+    let speedAccumRef = React.useRef(0.0)
     let runningRef = React.useRef(false)
     /* Audio: AudioContext + AudioWorklet は user gesture (= 初回 Power ON) が
        必要なので lazy 初期化. None = まだ作っていない. */
@@ -459,11 +467,23 @@ module App = {
         switch Nullable.toOption(famiCaml) {
         | Some(api) =>
           try {
-            api.runFrame()
-            renderNesFrame(canvasNes)
+            /* 可変クロック速度: 1 RAF tick あたり speedMul 個分の NES frame
+               を実行 (or 飛ばす). accumulator 方式で fractional 値も自然に. */
+            speedAccumRef.current = speedAccumRef.current +. speedMulRef.current
+            let framesThisRaf = ref(0)
+            while speedAccumRef.current >= 1.0 && framesThisRaf.contents < 16 {
+              api.runFrame()
+              speedAccumRef.current = speedAccumRef.current -. 1.0
+              framesThisRaf := framesThisRaf.contents + 1
+            }
+            let framesThisRaf = framesThisRaf.contents
+            if framesThisRaf > 0 {
+              renderNesFrame(canvasNes)
+            }
             /* Audio: 蓄積されたサンプルを worklet に流し込む.
-               1 frame ≒ 735 samples @ 44.1kHz (or 800 @ 48kHz). 余裕を持って 4096 まで取る. */
-            if audioReadyRef.current {
+               1 frame ≒ 735 samples @ 44.1kHz (or 800 @ 48kHz). 余裕を持って 4096 まで取る.
+               速度変更時は音はピッチが変わる (NES native rate のまま流すため). */
+            if audioReadyRef.current && framesThisRaf > 0 {
               switch audioNodeRef.current {
               | Some(node) =>
                 let samples = api.drainAudioSamples(4096)
@@ -642,6 +662,48 @@ module App = {
       | _ => ()
       }
     }
+
+    /* SRAM (.srm) file import. 8KB exactly expected. */
+    let onSramChange = event => {
+      let target = ReactEvent.Form.target(event)
+      switch (Nullable.toOption(targetFiles(target)), Nullable.toOption(famiCaml)) {
+      | (Some(fs), Some(api)) if fileListLength(fs) > 0 =>
+        let f = fileListItem(fs, 0)
+        fileArrayBuffer(f)
+        ->Promise.thenResolve(buf => {
+          let arr = newUint8Array(buf)
+          if api.loadSram(arr) {
+            setLastError(_ => None)
+          } else {
+            setLastError(_ => Some(
+              "SRAM 読み込み失敗 (8KB ちょうど & battery-backed cart 必要; size = "
+              ++ Int.toString(uint8ArrayLength(arr)) ++ ")",
+            ))
+          }
+        })
+        ->ignore
+      | _ => ()
+      }
+    }
+
+    /* SRAM (.srm) download — current cart の prg_ram を 8KB ファイルで保存. */
+    let onSramDownload = _ =>
+      switch Nullable.toOption(famiCaml) {
+      | Some(api) =>
+        switch Nullable.toOption(api.saveSram()) {
+        | Some(arr) =>
+          let blob = newBlob([arr], {"type": "application/octet-stream"})
+          let url = createObjectURL(blob)
+          let a = createAnchor()
+          let fname = selectedName == "" ? "save.srm" : selectedName ++ ".srm"
+          anchorHref(a, url)
+          anchorDownload(a, fname)
+          anchorClick(a)
+          revokeObjectURL(url)
+        | None => setLastError(_ => Some("SRAM not available"))
+        }
+      | None => ()
+      }
 
     /* .pal ファイル import */
     let onPalChange = event => {
@@ -900,7 +962,7 @@ module App = {
       }}>
       <h1> {React.string("FamiCaml")} </h1>
       <p style={{color: "#666"}}>
-        {React.string("対応マッパー: NROM (0) / UNROM (2) / CNROM (3)")}
+        {React.string("対応マッパー: NROM (0) / MMC1 (1) / UNROM (2) / CNROM (3) / MMC3 (4)")}
       </p>
       <section style={{marginTop: "1rem"}}>
         <input
@@ -915,6 +977,28 @@ module App = {
               {React.string("File: " ++ selectedName)}
             </p>}
       </section>
+      {/* battery-backed SRAM の load/save. cart.hasBattery が true でかつ
+          mapper が prg_ram を持つ場合のみ enable. */
+      switch state {
+      | Some(s) =>
+        switch Nullable.toOption(s.cart) {
+        | Some(cart) if cart.hasBattery =>
+          <section style={{marginTop: "0.5rem", display: "flex", alignItems: "center", gap: "0.5rem", fontSize: "0.9rem"}}>
+            <span style={{color: "#666"}}> {React.string("SRAM (battery):")} </span>
+            <input
+              type_="file"
+              accept=".srm,.sav,.sram"
+              ref={ReactDOM.Ref.domRef(sramFileInput)}
+              onChange={onSramChange}
+            />
+            <button onClick=onSramDownload style=buttonStyle>
+              {React.string("⬇ Download SRAM")}
+            </button>
+          </section>
+        | _ => React.null
+        }
+      | None => React.null
+      }}
       <section
         style={{
           marginTop: "1rem",
@@ -965,6 +1049,36 @@ module App = {
         <span style={{color: "#666", fontFamily: "monospace", fontSize: "0.9rem"}}>
           {React.string("FPS: " ++ Float.toFixed(fps, ~digits=1))}
         </span>
+        <label style={{display: "inline-flex", alignItems: "center", gap: "0.5rem", marginLeft: "1rem", fontSize: "0.9rem"}}>
+          {React.string("Speed:")}
+          <input
+            type_="range"
+            min="25"
+            max="400"
+            step={1.0}
+            value={Float.toString(speedMul *. 100.0)}
+            onChange={event => {
+              let target = ReactEvent.Form.target(event)
+              let v: string = target["value"]
+              let pct = Float.fromString(v)->Option.getOr(100.0)
+              let mul = pct /. 100.0
+              setSpeedMul(_ => mul)
+              speedMulRef.current = mul
+            }}
+            style={{width: "150px"}}
+          />
+          <span style={{fontFamily: "monospace", color: "#666", minWidth: "60px"}}>
+            {React.string(Float.toFixed(speedMul *. 100.0, ~digits=0) ++ "%")}
+          </span>
+          <button
+            style={{...buttonStyle, padding: "0.2rem 0.5rem", fontSize: "0.8rem"}}
+            onClick={_ => {
+              setSpeedMul(_ => 1.0)
+              speedMulRef.current = 1.0
+            }}>
+            {React.string("Reset")}
+          </button>
+        </label>
       </section>
       {switch lastError {
       | Some(msg) =>
@@ -975,19 +1089,39 @@ module App = {
       }}
       <section style={{marginTop: "1rem"}}>
         <h2 style={{marginBottom: "0.5rem"}}> {React.string("Screen")} </h2>
-        <canvas
-          ref={ReactDOM.Ref.domRef(canvasNes)}
-          width="256"
-          height="240"
+        <label style={{display: "inline-flex", alignItems: "center", gap: "0.5rem", marginBottom: "0.5rem", fontSize: "0.9rem"}}>
+          <input
+            type_="checkbox"
+            checked={hideOverscan}
+            onChange={event => {
+              let target = ReactEvent.Form.target(event)
+              let v: bool = target["checked"]
+              setHideOverscan(_ => v)
+            }}
+          />
+          {React.string("上下 8 line (overscan) を隠す")}
+        </label>
+        <div
           style={{
             width: "512px",
-            height: "480px",
-            imageRendering: "pixelated",
+            height: hideOverscan ? "448px" : "480px",
+            overflow: "hidden",
             border: "1px solid #444",
             backgroundColor: "#000",
-            display: "block",
-          }}
-        />
+          }}>
+          <canvas
+            ref={ReactDOM.Ref.domRef(canvasNes)}
+            width="256"
+            height="240"
+            style={{
+              width: "512px",
+              height: "480px",
+              imageRendering: "pixelated",
+              display: "block",
+              marginTop: hideOverscan ? "-16px" : "0",
+            }}
+          />
+        </div>
       </section>
       <section style={{marginTop: "1rem"}}>
         <h2 style={{marginBottom: "0.5rem"}}> {React.string("Pattern Tables")} </h2>
